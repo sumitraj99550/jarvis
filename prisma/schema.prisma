@@ -1,0 +1,198 @@
+// JARVIS — Prisma Schema
+// ---------------------------------------------------------------------------
+// This file is the single source of truth for the database. Run:
+//   npx prisma migrate dev --name init   (creates + applies the first migration)
+//   npx prisma generate                  (regenerates the type-safe client)
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["postgresqlExtensions"]
+}
+
+datasource db {
+  provider   = "postgresql"
+  // NOTE (Prisma 7): the `url` property is no longer set here. Prisma 7
+  // moved datasource connection details out of schema.prisma and into
+  // `prisma.config.ts` (see that file at the project root). This keeps the
+  // schema file purely structural/declarative.
+  extensions = [vector]
+}
+
+// ---------------------------------------------------------------------------
+// Core identity
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  MANAGER
+  SUPPORT
+  VIEWER
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String?
+  role      Role     @default(VIEWER)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversations Conversation[]
+  tasks         Task[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// AI Command Center (Phase 5+)
+// ---------------------------------------------------------------------------
+
+model Conversation {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   String   @db.Text
+  response  String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("conversations")
+}
+
+// ---------------------------------------------------------------------------
+// Long-term memory / knowledge base (Phase 17)
+// ---------------------------------------------------------------------------
+// `embedding` is declared `Unsupported` because Prisma Client does not yet
+// expose a native scalar type for pgvector. The column itself is created as
+// a real `vector(1536)` column by the migration (1536 matches OpenAI's
+// text-embedding-3-small / Claude-compatible embedding dimension). Reads and
+// writes to this column go through `prisma.$queryRaw` / `$executeRaw` until
+// Prisma ships first-class vector support.
+model MemoryEmbedding {
+  id        String   @id @default(cuid())
+  sourceId  String? // optional FK to the originating record (conversation, ticket, etc.)
+  content   String   @db.Text
+  embedding Unsupported("vector(1536)")
+  createdAt DateTime @default(now())
+
+  @@map("memory_embeddings")
+}
+
+// ---------------------------------------------------------------------------
+// Task management (Phase 18)
+// ---------------------------------------------------------------------------
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Task {
+  id            String       @id @default(cuid())
+  title         String
+  status        TaskStatus   @default(TODO)
+  priority      TaskPriority @default(MEDIUM)
+  assignedAgent String? // e.g. "hermes", "support-agent" — free text until Phase 7 defines an Agent registry
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([userId, status])
+  @@map("tasks")
+}
+
+// ---------------------------------------------------------------------------
+// Daily Briefing Engine (Phase 14)
+// ---------------------------------------------------------------------------
+
+model Briefing {
+  id        String   @id @default(cuid())
+  summary   String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@map("briefings")
+}
+
+// ---------------------------------------------------------------------------
+// Customer Support Agent (Phase 13)
+// ---------------------------------------------------------------------------
+
+enum TicketStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  ESCALATED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Ticket {
+  id         String         @id @default(cuid())
+  customer   String
+  status     TicketStatus   @default(OPEN)
+  priority   TicketPriority @default(MEDIUM)
+  resolution String?        @db.Text
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@map("tickets")
+}
+
+// ---------------------------------------------------------------------------
+// Meta Ads MCP (Phase 12)
+// ---------------------------------------------------------------------------
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+model Campaign {
+  id          String         @id @default(cuid())
+  name        String
+  status      CampaignStatus @default(DRAFT)
+  spend       Decimal        @default(0) @db.Decimal(12, 2)
+  impressions Int            @default(0)
+  clicks      Int            @default(0)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@map("campaigns")
+}
+
+// ---------------------------------------------------------------------------
+// Audit logging (Phase 8) — every agent action and tool call gets logged here
+// before execution, especially anything gated behind the approval flow.
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String // e.g. "meta_ads.increase_budget"
+  payload   Json? // structured details of what was requested/executed
+  status    String // "pending_approval" | "executed" | "rejected" | "failed"
+  createdAt DateTime @default(now())
+
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}
