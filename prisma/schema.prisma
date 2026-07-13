@@ -1,0 +1,209 @@
+// JARVIS — Prisma Schema
+// ---------------------------------------------------------------------------
+// This file is the single source of truth for the database.
+//
+// Prisma 7 changed how datasource connection details are provided:
+//   - Connection URL lives in `prisma.config.ts` (project root), NOT here
+//   - This file is purely structural: models, enums, and the provider name
+//
+// Common commands:
+//   npx prisma migrate dev   — generate & apply a new migration
+//   npx prisma generate      — regenerate the type-safe client
+//   npm run db:seed          — seed local dev data
+// ---------------------------------------------------------------------------
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  // NOTE: `url` is intentionally absent — Prisma 7 reads it from
+  // `prisma.config.ts` via `datasource.url`. Adding it here would cause
+  // "The datasource property `url` is no longer supported" error.
+}
+
+// ---------------------------------------------------------------------------
+// Core identity
+// ---------------------------------------------------------------------------
+
+enum Role {
+  ADMIN
+  MANAGER
+  SUPPORT
+  VIEWER
+}
+
+model User {
+  id      String  @id @default(cuid())
+  // clerkId is the stable identifier Clerk assigns every user (format: "user_xxx").
+  // It is the primary join key between Clerk's identity layer and our database.
+  // Nullable because rows seeded before Phase 3 pre-date Clerk; populated on
+  // first sign-in via webhook or getCurrentDbUser() fallback.
+  clerkId String? @unique
+  email   String  @unique
+  name    String?
+  role    Role    @default(VIEWER)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  conversations Conversation[]
+  tasks         Task[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+// ---------------------------------------------------------------------------
+// AI Command Center (Phase 5+)
+// ---------------------------------------------------------------------------
+
+model Conversation {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   String   @db.Text
+  response  String?  @db.Text
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@map("conversations")
+}
+
+// ---------------------------------------------------------------------------
+// Long-term memory / knowledge base — DEFERRED to Phase 17
+// ---------------------------------------------------------------------------
+// The MemoryEmbedding model (vector embeddings via pgvector) has been
+// intentionally excluded from this phase. Reasons:
+//   1. Standard `postgres:16-alpine` (the Docker image in docker-compose.yml)
+//      does NOT include the pgvector extension. Attempting to create the
+//      `vector` extension causes `prisma migrate dev` to fail with
+//      "extension \"vector\" is not available".
+//   2. No application code uses embeddings yet — this is a Phase 17 feature.
+//
+// When Phase 17 lands:
+//   - Switch the Docker image to `pgvector/pgvector:pg16`
+//   - Re-add `extensions = [vector]` to the datasource block
+//   - Add `previewFeatures = ["postgresqlExtensions"]` to the generator
+//   - Re-add the MemoryEmbedding model
+
+// ---------------------------------------------------------------------------
+// Task management (Phase 18)
+// ---------------------------------------------------------------------------
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  DONE
+  CANCELLED
+}
+
+enum TaskPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Task {
+  id            String       @id @default(cuid())
+  title         String
+  status        TaskStatus   @default(TODO)
+  priority      TaskPriority @default(MEDIUM)
+  // Free-text agent name (e.g. "hermes", "support-agent").
+  // Will be replaced with a proper Agent FK in Phase 7.
+  assignedAgent String?
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  @@index([userId, status])
+  @@map("tasks")
+}
+
+// ---------------------------------------------------------------------------
+// Daily Briefing Engine (Phase 14)
+// ---------------------------------------------------------------------------
+
+model Briefing {
+  id        String   @id @default(cuid())
+  summary   String   @db.Text
+  createdAt DateTime @default(now())
+
+  @@map("briefings")
+}
+
+// ---------------------------------------------------------------------------
+// Customer Support Agent (Phase 13)
+// ---------------------------------------------------------------------------
+
+enum TicketStatus {
+  OPEN
+  PENDING
+  RESOLVED
+  ESCALATED
+}
+
+enum TicketPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+model Ticket {
+  id         String         @id @default(cuid())
+  customer   String
+  status     TicketStatus   @default(OPEN)
+  priority   TicketPriority @default(MEDIUM)
+  resolution String?        @db.Text
+  createdAt  DateTime       @default(now())
+  updatedAt  DateTime       @updatedAt
+
+  @@map("tickets")
+}
+
+// ---------------------------------------------------------------------------
+// Meta Ads MCP (Phase 12)
+// ---------------------------------------------------------------------------
+
+enum CampaignStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  COMPLETED
+}
+
+model Campaign {
+  id          String         @id @default(cuid())
+  name        String
+  status      CampaignStatus @default(DRAFT)
+  spend       Decimal        @default(0) @db.Decimal(12, 2)
+  impressions Int            @default(0)
+  clicks      Int            @default(0)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+
+  @@map("campaigns")
+}
+
+// ---------------------------------------------------------------------------
+// Audit logging (Phase 8)
+// ---------------------------------------------------------------------------
+// Every agent action and tool call is logged here before execution —
+// especially anything gated behind the human-in-the-loop approval flow.
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String   // e.g. "meta_ads.increase_budget"
+  payload   Json?    // structured details of what was requested / executed
+  status    String   // "pending_approval" | "executed" | "rejected" | "failed"
+  createdAt DateTime @default(now())
+
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}

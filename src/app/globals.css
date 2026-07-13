@@ -1,0 +1,128 @@
+@import "tailwindcss";
+
+/* ----------------------------------------------------------------------- */
+/* JARVIS Design Tokens                                                     */
+/* These CSS variables are the single source of truth for the dashboard's  */
+/* dark, glassmorphic, neon-blue visual identity. Every future component   */
+/* (Phase 4+) should consume these tokens instead of hard-coded colors.     */
+/* ----------------------------------------------------------------------- */
+:root {
+  /* Base surface colors */
+  --background: #05070d;
+  --foreground: #e6f1ff;
+
+  /* Card / panel surfaces (glass effect base) */
+  --card: #0b0f1a;
+  --card-foreground: #e6f1ff;
+
+  --popover: #0b0f1a;
+  --popover-foreground: #e6f1ff;
+
+  /* Neon blue accent system */
+  --primary: #3ddcff;
+  --primary-foreground: #04141c;
+
+  --secondary: #1a2332;
+  --secondary-foreground: #cfe9ff;
+
+  --muted: #11161f;
+  --muted-foreground: #8a9bb3;
+
+  --accent: #2b6cff;
+  --accent-foreground: #f5f9ff;
+
+  --destructive: #ff4d6d;
+  --destructive-foreground: #fff5f7;
+
+  --border: rgba(61, 220, 255, 0.16);
+  --input: rgba(61, 220, 255, 0.14);
+  --ring: #3ddcff;
+
+  --radius: 0.875rem;
+
+  /* Glassmorphism specific tokens */
+  --glass-bg: rgba(13, 19, 33, 0.55);
+  --glass-border: rgba(61, 220, 255, 0.18);
+  --glass-blur: 18px;
+  --glow-primary: 0 0 24px rgba(61, 220, 255, 0.35);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+
+  --font-sans:
+    -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, Helvetica,
+    Arial, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+    background-image:
+      radial-gradient(
+        circle at 15% 0%,
+        rgba(61, 220, 255, 0.08),
+        transparent 45%
+      ),
+      radial-gradient(
+        circle at 85% 20%,
+        rgba(43, 108, 255, 0.1),
+        transparent 50%
+      );
+    background-attachment: fixed;
+    min-height: 100vh;
+  }
+}
+
+@layer utilities {
+  /* Reusable glass panel surface used by every card/widget across the dashboard */
+  .glass-panel {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(var(--glass-blur));
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    border-radius: var(--radius-lg);
+  }
+
+  .neon-glow {
+    box-shadow: var(--glow-primary);
+  }
+
+  .text-neon {
+    color: var(--primary);
+  }
+}
