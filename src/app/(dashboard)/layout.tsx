@@ -1,37 +1,49 @@
-export const dynamic = "force-dynamic";
-
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
+import { cache } from "react";
 import { getCurrentDbUser } from "@/lib/auth";
+import { Shell } from "@/components/layout/shell";
+
+export const dynamic = "force-dynamic";
 
 /**
- * Dashboard layout — protected shell for every /dashboard/* route.
+ * Cached user fetch for this render tree.
  *
- * Why check auth here when middleware already protects the route?
- * Defence in depth: middleware runs at the edge and can be bypassed if the
- * matcher pattern is misconfigured. A server-side auth check here means a
- * misconfigured matcher never leaks private data — the layout catches it.
+ * React's `cache()` deduplicates calls within the same server render pass.
+ * Both this layout AND the dashboard page call getCurrentDbUser() — without
+ * cache() that would be two separate Postgres round-trips per page load.
+ * With cache() it's one.
  *
- * Side-effect: calling getCurrentDbUser() here ensures the authenticated
- * Clerk user is synced into our Postgres `users` table on every page load.
- * In production the webhook (api/webhooks/clerk) handles this; this call
- * is a reliable fallback for local dev where webhooks aren't wired up.
+ * The cache is per-request (React resets it between requests), so there is
+ * no risk of serving stale user data across different visitors.
+ */
+const getCachedUser = cache(getCurrentDbUser);
+
+/**
+ * Dashboard layout — server component.
  *
- * Phase 4 will extend this layout with the full sidebar, top navigation,
- * notification bell, and user menu. For now it is a clean pass-through so
- * each dashboard page controls its own layout.
+ * Responsibilities:
+ *  1. Auth guard (belt + suspenders on top of proxy.ts middleware).
+ *  2. DB sync — ensures the Clerk user has a corresponding Prisma User row.
+ *  3. Renders the client Shell (sidebar + top-nav + main area).
+ *
+ * The Shell is a client component that manages sidebar collapse state.
+ * Children (individual dashboard pages) remain server components and are
+ * passed through as React children — they render on the server and stream
+ * into the shell's <main> slot.
  */
 export default async function DashboardLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  // Edge case guard — belt + suspenders alongside middleware
+  // Server-side auth guard
   const { userId } = await auth();
   if (!userId) redirect("/sign-in");
 
-  // Sync Clerk user → database (no-op if already synced via webhook)
-  await getCurrentDbUser();
+  // Sync Clerk → DB and get the current user record
+  const user = await getCachedUser();
+  if (!user) redirect("/sign-in");
 
-  return <>{children}</>;
+  return <Shell userRole={user.role}>{children}</Shell>;
 }
