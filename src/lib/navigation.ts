@@ -57,8 +57,6 @@ export const navigation: NavGroup[] = [
         label: "Command Center",
         href: "/dashboard/command",
         icon: Terminal,
-        phase: 5,
-        disabled: true,
       },
       {
         label: "Voice Assistant",

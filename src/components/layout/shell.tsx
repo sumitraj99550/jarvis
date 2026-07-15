@@ -67,7 +67,7 @@ export function Shell({ children, userRole }: ShellProps) {
         >
           <TopNav onMobileMenuOpen={openMobile} />
 
-          <main className="flex-1 overflow-y-auto">{children}</main>
+          <main className="flex-1 overflow-hidden">{children}</main>
         </div>
       </div>
     </TooltipProvider>
