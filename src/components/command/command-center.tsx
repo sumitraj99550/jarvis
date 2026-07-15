@@ -213,7 +213,7 @@ export function CommandCenter({
               placeholder={
                 hasApiKey
                   ? "Ask JARVIS anything…  (Ctrl + Enter to send)"
-                  : "Add ANTHROPIC_API_KEY to .env.local to enable chat"
+                  : "Add GOOGLE_AI_API_KEY to .env.local to enable chat"
               }
               disabled={isLoading || !hasApiKey}
               rows={1}
@@ -288,7 +288,7 @@ function EmptyState({ userName, hasApiKey, onSuggestion }: EmptyStateProps) {
             <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
               Add{" "}
               <code className="rounded bg-[var(--muted)] px-1 py-0.5">
-                ANTHROPIC_API_KEY
+                GOOGLE_AI_API_KEY
               </code>{" "}
               to{" "}
               <code className="rounded bg-[var(--muted)] px-1 py-0.5">

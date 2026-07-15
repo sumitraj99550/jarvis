@@ -1,10 +1,10 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
-import { anthropic, JARVIS_SYSTEM_PROMPT, CLAUDE_MODEL } from "@/lib/anthropic";
+import { sendMessage, type ChatTurn } from "@/lib/ai";
 import { getCurrentDbUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 
-/** Maximum number of previous turns to include as context for Claude */
+/** Previous turns to include as context (each turn = 1 user msg + 1 AI reply) */
 const MAX_CONTEXT_TURNS = 10;
 
 /** Maximum characters in a single user message */
@@ -64,18 +64,20 @@ export async function POST(req: NextRequest) {
   // -------------------------------------------------------------------------
   // 3. Guard: API key must be configured
   // -------------------------------------------------------------------------
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.GOOGLE_AI_API_KEY) {
     return NextResponse.json(
       {
         error:
-          "ANTHROPIC_API_KEY is not configured. Add it to .env.local and restart the server.",
+          "GOOGLE_AI_API_KEY is not configured. " +
+          "Get a free key at https://aistudio.google.com/apikey " +
+          "and add it to .env.local, then restart the server.",
       },
       { status: 503 },
     );
   }
 
   // -------------------------------------------------------------------------
-  // 4. Load recent conversation history for context
+  // 4. Load recent conversation history for multi-turn context
   // -------------------------------------------------------------------------
   const history = await db.conversation.findMany({
     where: { userId: user.id },
@@ -83,44 +85,26 @@ export async function POST(req: NextRequest) {
     take: MAX_CONTEXT_TURNS,
   });
 
-  // Build the Claude messages array: flatten (user, assistant) pairs
-  const contextMessages: { role: "user" | "assistant"; content: string }[] =
-    history.flatMap((turn: { message: string; response: string | null }) => [
-      { role: "user" as const, content: turn.message },
-      ...(turn.response
-        ? [{ role: "assistant" as const, content: turn.response }]
+  // Convert DB rows → ChatTurn format expected by sendMessage()
+  const contextTurns: ChatTurn[] = history.flatMap(
+    (row: { message: string; response: string | null }) => [
+      { role: "user" as const, content: row.message },
+      ...(row.response
+        ? [{ role: "assistant" as const, content: row.response }]
         : []),
-    ]);
-
-  // Append the current user message
-  const claudeMessages = [
-    ...contextMessages,
-    { role: "user" as const, content: message },
-  ];
+    ],
+  );
 
   // -------------------------------------------------------------------------
-  // 5. Call Claude
+  // 5. Call Gemini
   // -------------------------------------------------------------------------
   let responseText: string;
   try {
-    const completion = await anthropic.messages.create({
-      model: CLAUDE_MODEL,
-      max_tokens: 1024,
-      system: JARVIS_SYSTEM_PROMPT,
-      messages: claudeMessages,
-    });
-
-    // The first content block is the text response
-    const block = completion.content[0];
-    if (!block || block.type !== "text") {
-      throw new Error("Unexpected response structure from Claude API.");
-    }
-    responseText = block.text;
+    responseText = await sendMessage(message, contextTurns);
   } catch (err) {
-    console.error("[api/chat] Claude API error:", err);
-    const message =
-      err instanceof Error ? err.message : "Claude API call failed.";
-    return NextResponse.json({ error: message }, { status: 502 });
+    console.error("[api/chat] Gemini API error:", err);
+    const msg = err instanceof Error ? err.message : "AI API call failed.";
+    return NextResponse.json({ error: msg }, { status: 502 });
   }
 
   // -------------------------------------------------------------------------

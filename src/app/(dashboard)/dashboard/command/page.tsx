@@ -54,7 +54,7 @@ export default async function CommandPage() {
   if (!user) redirect("/sign-in");
 
   const initialMessages = await getConversationHistory(user.id);
-  const hasApiKey = Boolean(process.env.ANTHROPIC_API_KEY);
+  const hasApiKey = Boolean(process.env.GOOGLE_AI_API_KEY);
 
   return (
     <div className="flex h-full flex-col">
@@ -68,13 +68,13 @@ export default async function CommandPage() {
             Command Center
           </h2>
           <p className="text-xs text-[var(--muted-foreground)]">
-            Natural language interface · Model: claude-sonnet-4-6
+            Natural language interface · Model: gemini-2.0-flash (free)
           </p>
         </div>
         {/* API key warning */}
         {!hasApiKey && (
           <span className="ml-auto rounded-full border border-amber-500/40 bg-amber-500/10 px-2.5 py-0.5 text-[10px] font-medium text-amber-400">
-            ANTHROPIC_API_KEY not set
+            GOOGLE_AI_API_KEY not set
           </span>
         )}
       </div>

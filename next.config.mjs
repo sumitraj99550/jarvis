@@ -24,6 +24,7 @@ const nextConfig = {
     "@prisma/adapter-pg",
     "pg",
     "prisma",
+    "@google/generative-ai",
   ],
 };
 
