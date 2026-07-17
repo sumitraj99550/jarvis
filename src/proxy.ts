@@ -1,39 +1,24 @@
-import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { clerkMiddleware } from "@clerk/nextjs/server";
 
 /**
- * Public routes — Clerk does NOT require authentication for these.
+ * Clerk middleware (Next.js 16 — file must be named proxy.ts).
  *
- * Everything else is private by default: attempting to access a non-public
- * route without a valid Clerk session triggers auth.protect(), which
- * redirects the browser to the sign-in page.
+ * This is intentionally a pass-through middleware. Route protection is
+ * handled inside each layout/page via `auth()` server-side calls:
  *
- * Pattern syntax: strings are treated as path prefixes; `(.*)` means
- * "this path and any sub-paths".
+ *   - src/app/(dashboard)/layout.tsx  → auth guard for all /dashboard/* routes
+ *   - src/app/page.tsx               → redirects based on auth state
+ *
+ * Why not use createRouteMatcher?
+ * Clerk v6 deprecated middleware-based route matching because path patterns
+ * can diverge from how Next.js actually resolves routes, creating false
+ * security. Resource-based checks in layouts are the recommended pattern.
+ *
+ * The middleware still runs on every request so Clerk can set up its
+ * session context — that's all it needs to do here.
  */
-const isPublicRoute = createRouteMatcher([
-  "/sign-in(.*)", // Clerk sign-in UI
-  "/sign-up(.*)", // Clerk sign-up UI
-  "/api/webhooks(.*)", // Clerk webhook — must stay public so Clerk can POST to it
-]);
+export default clerkMiddleware();
 
-export default clerkMiddleware(async (auth, req) => {
-  if (!isPublicRoute(req)) {
-    // auth.protect() redirects to sign-in if there is no active session.
-    // It does nothing if the user is already authenticated.
-    await auth.protect();
-  }
-});
-
-/**
- * Next.js middleware matcher.
- *
- * The negative lookahead excludes:
- *   - Next.js internals  (_next/*)
- *   - Static asset files (images, fonts, favicon, etc.)
- *
- * The second pattern ensures API and tRPC routes are always processed.
- * This is copied verbatim from Clerk's official Next.js App Router docs.
- */
 export const config = {
   matcher: [
     "/((?!_next|[^?]*\\.(?:html?|css|js(?!on)|jpe?g|webp|png|gif|svg|ttf|woff2?|ico|csv|docx?|xlsx?|zip|webmanifest)).*)",

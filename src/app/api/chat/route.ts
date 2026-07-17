@@ -1,83 +1,97 @@
 import { auth } from "@clerk/nextjs/server";
-import { NextRequest, NextResponse } from "next/server";
-import { sendMessage, type ChatTurn } from "@/lib/ai";
+import { NextRequest } from "next/server";
+import { streamMessage, type ChatTurn } from "@/lib/ai";
 import { getCurrentDbUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 
-/** Previous turns to include as context (each turn = 1 user msg + 1 AI reply) */
 const MAX_CONTEXT_TURNS = 10;
-
-/** Maximum characters in a single user message */
 const MAX_MESSAGE_LENGTH = 4000;
+
+/**
+ * SSE event helpers
+ *
+ * Every event is a single `data:` line followed by two newlines, which is
+ * the standard Server-Sent Events wire format. The client's ReadableStream
+ * reader splits on `\n\n` to parse individual events.
+ */
+const enc = new TextEncoder();
+
+function sseChunk(chunk: string): Uint8Array {
+  return enc.encode(`data: ${JSON.stringify({ chunk, done: false })}\n\n`);
+}
+
+function sseDone(id: string): Uint8Array {
+  return enc.encode(`data: ${JSON.stringify({ done: true, id })}\n\n`);
+}
+
+function sseError(message: string): Uint8Array {
+  return enc.encode(
+    `data: ${JSON.stringify({ error: message, done: true })}\n\n`,
+  );
+}
 
 export async function POST(req: NextRequest) {
   // -------------------------------------------------------------------------
-  // 1. Authentication
+  // 1. Auth
   // -------------------------------------------------------------------------
   const { userId } = await auth();
   if (!userId) {
-    return NextResponse.json({ error: "Unauthenticated." }, { status: 401 });
+    return new Response(JSON.stringify({ error: "Unauthenticated." }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   const user = await getCurrentDbUser();
   if (!user) {
-    return NextResponse.json({ error: "User not found." }, { status: 401 });
+    return new Response(JSON.stringify({ error: "User not found." }), {
+      status: 401,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 
   // -------------------------------------------------------------------------
-  // 2. Parse and validate the request body
+  // 2. Validate body
   // -------------------------------------------------------------------------
-  let body: unknown;
+  let message: string;
   try {
-    body = await req.json();
+    const body = (await req.json()) as { message?: unknown };
+    if (typeof body.message !== "string" || !body.message.trim()) {
+      throw new Error("Invalid message");
+    }
+    message = body.message.trim();
   } catch {
-    return NextResponse.json(
-      { error: "Invalid JSON in request body." },
-      { status: 400 },
-    );
-  }
-
-  const message =
-    body &&
-    typeof body === "object" &&
-    "message" in body &&
-    typeof (body as Record<string, unknown>).message === "string"
-      ? ((body as Record<string, unknown>).message as string).trim()
-      : null;
-
-  if (!message) {
-    return NextResponse.json(
-      { error: "Field 'message' is required and must be a non-empty string." },
-      { status: 400 },
+    return new Response(
+      JSON.stringify({ error: "'message' must be a non-empty string." }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
     );
   }
 
   if (message.length > MAX_MESSAGE_LENGTH) {
-    return NextResponse.json(
-      {
-        error: `Message exceeds the ${MAX_MESSAGE_LENGTH.toLocaleString()}-character limit.`,
-      },
-      { status: 400 },
+    return new Response(
+      JSON.stringify({
+        error: `Message exceeds ${MAX_MESSAGE_LENGTH.toLocaleString()} characters.`,
+      }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
     );
   }
 
   // -------------------------------------------------------------------------
-  // 3. Guard: API key must be configured
+  // 3. Guard: API key
   // -------------------------------------------------------------------------
   if (!process.env.GOOGLE_AI_API_KEY) {
-    return NextResponse.json(
-      {
+    return new Response(
+      JSON.stringify({
         error:
           "GOOGLE_AI_API_KEY is not configured. " +
-          "Get a free key at https://aistudio.google.com/apikey " +
-          "and add it to .env.local, then restart the server.",
-      },
-      { status: 503 },
+          "Get a free key at https://aistudio.google.com/apikey",
+      }),
+      { status: 503, headers: { "Content-Type": "application/json" } },
     );
   }
 
   // -------------------------------------------------------------------------
-  // 4. Load recent conversation history for multi-turn context
+  // 4. Load conversation history for context
   // -------------------------------------------------------------------------
   const history = await db.conversation.findMany({
     where: { userId: user.id },
@@ -85,7 +99,6 @@ export async function POST(req: NextRequest) {
     take: MAX_CONTEXT_TURNS,
   });
 
-  // Convert DB rows → ChatTurn format expected by sendMessage()
   const contextTurns: ChatTurn[] = history.flatMap(
     (row: { message: string; response: string | null }) => [
       { role: "user" as const, content: row.message },
@@ -96,34 +109,43 @@ export async function POST(req: NextRequest) {
   );
 
   // -------------------------------------------------------------------------
-  // 5. Call Gemini
+  // 5. Stream Gemini response via SSE
   // -------------------------------------------------------------------------
-  let responseText: string;
-  try {
-    responseText = await sendMessage(message, contextTurns);
-  } catch (err) {
-    console.error("[api/chat] Gemini API error:", err);
-    const msg = err instanceof Error ? err.message : "AI API call failed.";
-    return NextResponse.json({ error: msg }, { status: 502 });
-  }
+  const stream = new ReadableStream({
+    async start(controller) {
+      let fullText = "";
 
-  // -------------------------------------------------------------------------
-  // 6. Persist the conversation turn
-  // -------------------------------------------------------------------------
-  const saved = await db.conversation.create({
-    data: {
-      userId: user.id,
-      message,
-      response: responseText,
+      try {
+        const chunks = await streamMessage(message, contextTurns);
+
+        for await (const chunk of chunks) {
+          fullText += chunk;
+          controller.enqueue(sseChunk(chunk));
+        }
+
+        // Persist the completed turn
+        const saved = await db.conversation.create({
+          data: { userId: user.id, message, response: fullText },
+        });
+
+        controller.enqueue(sseDone(saved.id));
+      } catch (err) {
+        console.error("[api/chat] stream error:", err);
+        const msg = err instanceof Error ? err.message : "AI stream failed.";
+        controller.enqueue(sseError(msg));
+      } finally {
+        controller.close();
+      }
     },
   });
 
-  // -------------------------------------------------------------------------
-  // 7. Return the response
-  // -------------------------------------------------------------------------
-  return NextResponse.json({
-    id: saved.id,
-    response: responseText,
-    createdAt: saved.createdAt.toISOString(),
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache, no-transform",
+      Connection: "keep-alive",
+      // Tell proxies/nginx not to buffer the stream
+      "X-Accel-Buffering": "no",
+    },
   });
 }

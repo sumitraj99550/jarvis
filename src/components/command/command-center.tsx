@@ -22,6 +22,8 @@ export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  /** true while tokens are still streaming in */
+  streaming?: boolean;
 };
 
 interface CommandCenterProps {
@@ -31,7 +33,7 @@ interface CommandCenterProps {
 }
 
 // ---------------------------------------------------------------------------
-// Suggested starter prompts shown on the empty state
+// Suggested starter prompts
 // ---------------------------------------------------------------------------
 const SUGGESTIONS = [
   "What can you help me with?",
@@ -56,14 +58,13 @@ export function CommandCenter({
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const scrollAreaRef = useRef<HTMLDivElement>(null);
 
-  // Auto-scroll to bottom whenever messages change or loading state changes
+  // Auto-scroll to bottom when messages or loading state changes
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isLoading]);
 
-  // Auto-resize textarea as the user types
+  // Auto-resize textarea
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -77,63 +78,123 @@ export function CommandCenter({
   }, []);
 
   // -------------------------------------------------------------------------
-  // Send handler
+  // Send — streaming version
   // -------------------------------------------------------------------------
   const sendMessage = useCallback(
     async (content: string) => {
       if (!content.trim() || isLoading) return;
-
       const trimmed = content.trim();
 
-      // 1. Optimistic update — show the user's message immediately
-      const optimisticId = `optimistic-${Date.now()}`;
-      const userMessage: ChatMessage = {
-        id: optimisticId,
-        role: "user",
-        content: trimmed,
-        createdAt: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, userMessage]);
+      // 1. Optimistic user message
+      const userMsgId = `user-${Date.now()}`;
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: userMsgId,
+          role: "user",
+          content: trimmed,
+          createdAt: new Date().toISOString(),
+        },
+      ]);
       setInput("");
       setIsLoading(true);
       setError(null);
-
-      // Reset textarea height
       if (textareaRef.current) textareaRef.current.style.height = "auto";
 
+      // 2. Streaming assistant message placeholder
+      const streamId = `stream-${Date.now()}`;
+
       try {
-        // 2. Call the API
         const res = await fetch("/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message: trimmed }),
         });
 
-        const data = (await res.json()) as {
-          id?: string;
-          response?: string;
-          createdAt?: string;
-          error?: string;
-        };
-
+        // Non-2xx before streaming starts → parse JSON error
         if (!res.ok) {
+          const data = (await res.json().catch(() => ({}))) as {
+            error?: string;
+          };
           throw new Error(data.error ?? `Server error ${res.status}`);
         }
 
-        // 3. Append the real assistant message
-        const assistantMessage: ChatMessage = {
-          id: data.id ?? `assistant-${Date.now()}`,
-          role: "assistant",
-          content: data.response ?? "",
-          createdAt: data.createdAt ?? new Date().toISOString(),
-        };
-        setMessages((prev) => [...prev, assistantMessage]);
+        if (!res.body) throw new Error("No response body from server.");
+
+        // 3. Add empty streaming message — typing indicator disappears
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: streamId,
+            role: "assistant",
+            content: "",
+            createdAt: new Date().toISOString(),
+            streaming: true,
+          },
+        ]);
+        setIsLoading(false); // hide typing indicator; streaming message visible instead
+
+        // 4. Consume SSE stream
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        outer: while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const parts = buffer.split("\n\n");
+          buffer = parts.pop() ?? "";
+
+          for (const part of parts) {
+            const line = part.trim();
+            if (!line.startsWith("data: ")) continue;
+
+            let event: Record<string, unknown>;
+            try {
+              event = JSON.parse(line.slice(6)) as Record<string, unknown>;
+            } catch {
+              continue; // skip malformed lines
+            }
+
+            if (event.error) {
+              throw new Error(String(event.error));
+            }
+
+            if (!event.done && typeof event.chunk === "string") {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === streamId
+                    ? { ...m, content: m.content + event.chunk }
+                    : m,
+                ),
+              );
+            }
+
+            if (event.done) {
+              // Replace temp id with the real DB id
+              const realId = typeof event.id === "string" ? event.id : streamId;
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === streamId
+                    ? { ...m, id: realId, streaming: false }
+                    : m,
+                ),
+              );
+              break outer;
+            }
+          }
+        }
       } catch (err) {
         const msg =
           err instanceof Error ? err.message : "Something went wrong.";
         setError(msg);
-        // Roll back the optimistic message
-        setMessages((prev) => prev.filter((m) => m.id !== optimisticId));
+        // Roll back both the user message and the streaming placeholder
+        setMessages((prev) =>
+          prev.filter((m) => m.id !== userMsgId && m.id !== streamId),
+        );
+        setIsLoading(false);
       } finally {
         setIsLoading(false);
         textareaRef.current?.focus();
@@ -143,7 +204,7 @@ export function CommandCenter({
   );
 
   // -------------------------------------------------------------------------
-  // Keyboard handler — Ctrl/Cmd + Enter sends
+  // Keyboard handler
   // -------------------------------------------------------------------------
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
@@ -157,17 +218,18 @@ export function CommandCenter({
     void sendMessage(input);
   };
 
+  // Is JARVIS currently streaming a response?
+  const isStreaming = messages.some((m) => m.streaming);
+  const inputDisabled = isLoading || isStreaming || !hasApiKey;
+
   // -------------------------------------------------------------------------
   // Render
   // -------------------------------------------------------------------------
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* ------------------------------------------------------------------ */}
-      {/* Message list                                                        */}
-      {/* ------------------------------------------------------------------ */}
-      <ScrollArea ref={scrollAreaRef} className="flex-1">
+      {/* Messages */}
+      <ScrollArea className="flex-1">
         <div className="mx-auto max-w-3xl space-y-1 px-4 py-6">
-          {/* Empty state */}
           {messages.length === 0 && (
             <EmptyState
               userName={userName}
@@ -176,61 +238,54 @@ export function CommandCenter({
             />
           )}
 
-          {/* Message bubbles */}
           <AnimatePresence initial={false}>
             {messages.map((msg) => (
               <MessageBubble key={msg.id} message={msg} />
             ))}
           </AnimatePresence>
 
-          {/* Typing indicator */}
-          {isLoading && <TypingIndicator />}
+          {/* Typing indicator — only while waiting for the FIRST chunk */}
+          {isLoading && !isStreaming && <TypingIndicator />}
 
-          {/* Error banner */}
           {error && (
             <ErrorBanner message={error} onDismiss={() => setError(null)} />
           )}
 
-          {/* Scroll anchor */}
           <div ref={bottomRef} className="h-1" />
         </div>
       </ScrollArea>
 
-      {/* ------------------------------------------------------------------ */}
-      {/* Input bar                                                           */}
-      {/* ------------------------------------------------------------------ */}
+      {/* Input bar */}
       <div className="shrink-0 border-t border-[var(--glass-border)] bg-[var(--background)]/80 px-4 py-3 backdrop-blur-md">
         <form
           onSubmit={handleSubmit}
           className="mx-auto flex max-w-3xl items-end gap-2"
         >
-          <div className="relative flex-1">
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={
-                hasApiKey
-                  ? "Ask JARVIS anything…  (Ctrl + Enter to send)"
-                  : "Add GOOGLE_AI_API_KEY to .env.local to enable chat"
-              }
-              disabled={isLoading || !hasApiKey}
-              rows={1}
-              className={cn(
-                "w-full resize-none rounded-xl border border-[var(--glass-border)] bg-[var(--secondary)]/40",
-                "px-4 py-3 pr-12 text-sm text-[var(--foreground)] placeholder:text-[var(--muted-foreground)]",
-                "transition-colors outline-none",
-                "focus:border-[var(--primary)]/60 focus:bg-[var(--secondary)]/60",
-                "disabled:cursor-not-allowed disabled:opacity-50",
-                "max-h-[200px] overflow-y-auto",
-              )}
-            />
-          </div>
-
+          <textarea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={
+              hasApiKey
+                ? "Ask JARVIS anything…  (Ctrl + Enter to send)"
+                : "Add GOOGLE_AI_API_KEY to .env.local to enable chat"
+            }
+            disabled={inputDisabled}
+            rows={1}
+            className={cn(
+              "w-full resize-none rounded-xl border border-[var(--glass-border)]",
+              "bg-[var(--secondary)]/40 px-4 py-3 text-sm text-[var(--foreground)]",
+              "placeholder:text-[var(--muted-foreground)]",
+              "transition-colors outline-none",
+              "focus:border-[var(--primary)]/60 focus:bg-[var(--secondary)]/60",
+              "disabled:cursor-not-allowed disabled:opacity-50",
+              "max-h-[200px] overflow-y-auto",
+            )}
+          />
           <Button
             type="submit"
-            disabled={isLoading || !input.trim() || !hasApiKey}
+            disabled={inputDisabled || !input.trim()}
             size="icon"
             className="mb-0.5 size-11 shrink-0 rounded-xl"
           >
@@ -240,8 +295,7 @@ export function CommandCenter({
         </form>
 
         <p className="mx-auto mt-1.5 max-w-3xl text-center text-[10px] text-[var(--muted-foreground)]">
-          JARVIS can make mistakes. Phase 6 adds streaming · Phase 7 adds tools
-          &amp; memory
+          Responses stream in real time · Phase 7 adds tools &amp; memory
         </p>
       </div>
     </div>
@@ -251,24 +305,24 @@ export function CommandCenter({
 // ---------------------------------------------------------------------------
 // Empty state
 // ---------------------------------------------------------------------------
-interface EmptyStateProps {
+function EmptyState({
+  userName,
+  hasApiKey,
+  onSuggestion,
+}: {
   userName: string;
   hasApiKey: boolean;
   onSuggestion: (s: string) => void;
-}
-
-function EmptyState({ userName, hasApiKey, onSuggestion }: EmptyStateProps) {
+}) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       animate={{ opacity: 1, y: 0 }}
       className="flex flex-col items-center gap-6 py-12 text-center"
     >
-      {/* JARVIS avatar */}
       <div className="neon-glow flex size-16 items-center justify-center rounded-2xl bg-[var(--primary)]/10">
         <Zap className="text-neon size-8" />
       </div>
-
       <div className="space-y-1">
         <h3 className="text-lg font-semibold text-[var(--foreground)]">
           Hello, {userName}.
@@ -294,13 +348,12 @@ function EmptyState({ userName, hasApiKey, onSuggestion }: EmptyStateProps) {
               <code className="rounded bg-[var(--muted)] px-1 py-0.5">
                 .env.local
               </code>{" "}
-              and restart the dev server to enable the Command Center.
+              and restart the dev server.
             </p>
           </div>
         </div>
       )}
 
-      {/* Suggestion chips */}
       {hasApiKey && (
         <div className="flex max-w-lg flex-wrap justify-center gap-2">
           {SUGGESTIONS.map((s) => (
@@ -356,32 +409,38 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         className={cn(
           "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
           isUser
-            ? "rounded-tr-sm bg-[var(--primary)]/15 text-[var(--foreground)] shadow-[0_0_12px_rgba(61,220,255,0.08)]"
+            ? "rounded-tr-sm bg-[var(--primary)]/15 text-[var(--foreground)]"
             : "rounded-tl-sm bg-[var(--secondary)]/50 text-[var(--foreground)]",
         )}
       >
-        {/* Render content with preserved whitespace and newlines */}
         <MessageContent content={message.content} />
 
-        {/* Timestamp */}
-        <p
-          className={cn(
-            "mt-1.5 text-[10px] text-[var(--muted-foreground)]",
-            isUser ? "text-right" : "text-left",
-          )}
-        >
-          {formatTime(message.createdAt)}
-        </p>
+        {/* Blinking cursor while streaming */}
+        {message.streaming && (
+          <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse rounded-full bg-[var(--primary)]" />
+        )}
+
+        {/* Timestamp — only when done streaming */}
+        {!message.streaming && (
+          <p
+            className={cn(
+              "mt-1.5 text-[10px] text-[var(--muted-foreground)]",
+              isUser ? "text-right" : "text-left",
+            )}
+          >
+            {formatTime(message.createdAt)}
+          </p>
+        )}
       </div>
     </motion.div>
   );
 }
 
 // ---------------------------------------------------------------------------
-// Message content renderer — handles basic markdown-like formatting
+// Message content renderer
 // ---------------------------------------------------------------------------
 function MessageContent({ content }: { content: string }) {
-  // Split on code blocks (```...```) and render them distinctly
+  // Split on fenced code blocks (``` ... ```)
   const parts = content.split(/(```[\s\S]*?```)/g);
 
   return (
@@ -389,21 +448,17 @@ function MessageContent({ content }: { content: string }) {
       {parts.map((part, i) => {
         if (part.startsWith("```") && part.endsWith("```")) {
           const inner = part.slice(3, -3);
-          // Strip language identifier from first line
-          const firstNewline = inner.indexOf("\n");
-          const code =
-            firstNewline > -1 ? inner.slice(firstNewline + 1) : inner;
+          const newline = inner.indexOf("\n");
+          const code = newline > -1 ? inner.slice(newline + 1) : inner;
           return (
             <pre
               key={i}
-              className="overflow-x-auto rounded-lg bg-[var(--muted)] p-3 font-mono text-xs leading-relaxed text-[var(--foreground)]"
+              className="overflow-x-auto rounded-lg bg-[var(--muted)] p-3 font-mono text-xs leading-relaxed"
             >
               {code}
             </pre>
           );
         }
-
-        // Regular text — preserve newlines
         return (
           <span key={i} className="whitespace-pre-wrap">
             {part}
@@ -415,7 +470,7 @@ function MessageContent({ content }: { content: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Typing indicator
+// Typing indicator (shown while waiting for the first stream chunk)
 // ---------------------------------------------------------------------------
 function TypingIndicator() {
   return (
@@ -455,7 +510,6 @@ function ErrorBanner({
     <motion.div
       initial={{ opacity: 0, y: 8 }}
       animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0 }}
       className="flex items-start gap-3 rounded-xl border border-[var(--destructive)]/30 bg-[var(--destructive)]/10 px-4 py-3 text-sm"
     >
       <AlertCircle className="mt-0.5 size-4 shrink-0 text-[var(--destructive)]" />

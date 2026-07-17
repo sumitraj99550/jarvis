@@ -13,8 +13,8 @@
 // ---------------------------------------------------------------------------
 
 generator client {
-  provider        = "prisma-client-js"
-  previewFeatures = ["driverAdapters"]
+  provider = "prisma-client-js"
+  // driverAdapters no longer requires a previewFeature flag in Prisma 7.8+
 }
 
 datasource db {

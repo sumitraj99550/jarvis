@@ -1,50 +1,75 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useSyncExternalStore } from "react";
 
 const STORAGE_KEY = "jarvis-sidebar-collapsed";
 
-/**
- * Read the persisted sidebar preference synchronously.
- *
- * Using a useState lazy initializer (the function passed to useState) instead
- * of a useEffect means:
- *  - No state update inside an effect (satisfies the react-hooks lint rule).
- *  - The value is read before the first render, so there is no mid-paint
- *    correction and no layout flash on the client.
- *  - On the server (typeof window === 'undefined') we return false to match
- *    the initial HTML and avoid React hydration warnings. The client will
- *    immediately use the saved preference from localStorage.
- */
-function readStoredCollapsed(): boolean {
-  if (typeof window === "undefined") return false; // SSR: neutral default
+// ---------------------------------------------------------------------------
+// useSyncExternalStore callbacks
+// ---------------------------------------------------------------------------
+// This is the React 18 recommended pattern for reading localStorage with SSR.
+//
+// getServerSnapshot always returns false — this is what the server renders.
+// getClientSnapshot reads the real value from localStorage.
+//
+// When the two differ, React knows it's an intentional server/client
+// divergence (not a bug) and skips the hydration-mismatch warning. It
+// immediately re-renders on the client with the real value before the first
+// visible paint, so the user never sees a flash.
+
+function subscribe(callback: () => void) {
+  // Listen for changes from other tabs / manual dispatchEvent calls
+  window.addEventListener("storage", callback);
+  return () => window.removeEventListener("storage", callback);
+}
+
+function getClientSnapshot(): boolean {
   try {
     return localStorage.getItem(STORAGE_KEY) === "true";
   } catch {
-    return false; // private browsing / storage quota exceeded
+    return false;
   }
 }
+
+function getServerSnapshot(): boolean {
+  // Server always returns the neutral default — avoids HTML mismatch
+  return false;
+}
+
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
 
 /**
  * Sidebar collapse + mobile-open state.
  *
- * isCollapsed  — desktop sidebar width toggle (persisted to localStorage)
- * isMobileOpen — mobile drawer visibility (transient, not persisted)
+ * isCollapsed  — desktop collapse (persisted to localStorage, SSR-safe)
+ * isMobileOpen — mobile drawer (transient, session-only)
  */
 export function useSidebar() {
-  const [isCollapsed, setIsCollapsed] = useState<boolean>(readStoredCollapsed);
+  const isCollapsed = useSyncExternalStore(
+    subscribe,
+    getClientSnapshot,
+    getServerSnapshot,
+  );
+
   const [isMobileOpen, setIsMobileOpen] = useState(false);
 
   const toggle = useCallback(() => {
-    setIsCollapsed((prev) => {
-      const next = !prev;
-      try {
-        localStorage.setItem(STORAGE_KEY, String(next));
-      } catch {
-        // ignore write failures
-      }
-      return next;
-    });
+    try {
+      const next = localStorage.getItem(STORAGE_KEY) !== "true";
+      localStorage.setItem(STORAGE_KEY, String(next));
+      // Notify useSyncExternalStore subscribers (including this hook)
+      window.dispatchEvent(
+        new StorageEvent("storage", {
+          key: STORAGE_KEY,
+          newValue: String(next),
+          storageArea: localStorage,
+        }),
+      );
+    } catch {
+      // localStorage unavailable — collapse state is just not persisted
+    }
   }, []);
 
   const openMobile = useCallback(() => setIsMobileOpen(true), []);

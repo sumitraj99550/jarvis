@@ -1,19 +1,12 @@
 import { GoogleGenerativeAI, type Content } from "@google/generative-ai";
 
 /**
- * Google Gemini AI — free tier, no billing required.
+ * Google Gemini AI client.
  *
- * Model: gemini-2.0-flash
- *   - Free tier: 15 requests/min · 1,500 requests/day · 1M tokens/min
- *   - No credit card required
- *   - Get your key in 30 seconds: https://aistudio.google.com/apikey
- *
- * Set GOOGLE_AI_API_KEY in .env.local, then restart the dev server.
+ * Free tier (no billing required):
+ *   Get a key at https://aistudio.google.com/apikey
+ *   Set GOOGLE_AI_API_KEY in .env.local
  */
-
-// ---------------------------------------------------------------------------
-// Singleton client
-// ---------------------------------------------------------------------------
 
 const globalForAI = globalThis as unknown as {
   googleAI: GoogleGenerativeAI | undefined;
@@ -35,11 +28,11 @@ function getClient(): GoogleGenerativeAI {
 }
 
 // ---------------------------------------------------------------------------
-// Model constant — single source of truth
+// Model — update this one constant to change model everywhere
 // ---------------------------------------------------------------------------
 export const AI_MODEL = "gemini-3.5-flash" as const;
 
-// ----------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
 // JARVIS system prompt
 // ---------------------------------------------------------------------------
 export const JARVIS_SYSTEM_PROMPT = `\
@@ -56,20 +49,18 @@ You assist with:
 Tone and style:
 - Be concise and direct — value the user's time
 - Use markdown formatting (bold, bullets, code blocks) where it improves clarity
-- Be proactive: if you spot follow-up actions the user should consider, mention them
+- Be proactive: mention follow-up actions the user should consider
 - Speak with confidence and precision, like a trusted executive assistant`;
 
 // ---------------------------------------------------------------------------
-// Gemini message format adapter
+// Message type shared by both helpers
 // ---------------------------------------------------------------------------
-// Anthropic uses { role: "user"|"assistant", content: string }
-// Gemini uses  { role: "user"|"model",       parts: [{ text }] }
-
 export type ChatTurn = {
   role: "user" | "assistant";
   content: string;
 };
 
+// Gemini uses "model" instead of "assistant" for its role
 function toGeminiHistory(turns: ChatTurn[]): Content[] {
   return turns.map((t) => ({
     role: t.role === "assistant" ? "model" : "user",
@@ -78,34 +69,54 @@ function toGeminiHistory(turns: ChatTurn[]): Content[] {
 }
 
 // ---------------------------------------------------------------------------
-// Main helper — called by the chat API route
+// Non-streaming helper (kept for tests / server actions that don't need SSE)
 // ---------------------------------------------------------------------------
-
-/**
- * Send a message to Gemini and return the text response.
- *
- * @param message   The current user message
- * @param history   Previous turns for multi-turn context (oldest first)
- */
 export async function sendMessage(
   message: string,
   history: ChatTurn[],
 ): Promise<string> {
-  const client = getClient();
-
-  const model = client.getGenerativeModel({
+  const model = getClient().getGenerativeModel({
     model: AI_MODEL,
     systemInstruction: JARVIS_SYSTEM_PROMPT,
   });
-
-  // Gemini's chat API keeps history separate from the current message
-  const chat = model.startChat({
-    history: toGeminiHistory(history),
-  });
-
+  const chat = model.startChat({ history: toGeminiHistory(history) });
   const result = await chat.sendMessage(message);
   const text = result.response.text();
-
   if (!text) throw new Error("Empty response from Gemini API.");
   return text;
+}
+
+// ---------------------------------------------------------------------------
+// Streaming helper — Phase 6
+// ---------------------------------------------------------------------------
+/**
+ * Stream a response from Gemini, yielding text chunks as they arrive.
+ *
+ * Usage in an API route:
+ *   for await (const chunk of streamMessage(message, history)) {
+ *     // encode and enqueue chunk to the ReadableStream
+ *   }
+ */
+export async function streamMessage(
+  message: string,
+  history: ChatTurn[],
+): Promise<AsyncIterable<string>> {
+  const model = getClient().getGenerativeModel({
+    model: AI_MODEL,
+    systemInstruction: JARVIS_SYSTEM_PROMPT,
+  });
+  const chat = model.startChat({ history: toGeminiHistory(history) });
+
+  // sendMessageStream returns a GenerateContentStreamResult
+  const result = await chat.sendMessageStream(message);
+
+  // Wrap in an async iterable that yields plain text strings
+  return {
+    [Symbol.asyncIterator]: async function* () {
+      for await (const chunk of result.stream) {
+        const text = chunk.text();
+        if (text) yield text;
+      }
+    },
+  };
 }
