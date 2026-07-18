@@ -8,10 +8,22 @@ import React, {
   FormEvent,
 } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { Send, Zap, AlertCircle, User } from "lucide-react";
+import {
+  Send,
+  Zap,
+  AlertCircle,
+  User,
+  Cpu,
+  Wrench,
+  CheckCircle2,
+  ToggleLeft,
+  ToggleRight,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import type { AgentEvent, ToolRecord } from "@/lib/hermes/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -22,9 +34,21 @@ export type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
-  /** true while tokens are still streaming in */
   streaming?: boolean;
+  /** Tools used (Hermes mode only) */
+  tools?: ToolRecord[];
 };
+
+type ActivityItem =
+  | { id: string; kind: "status"; message: string }
+  | { id: string; kind: "tool_start"; name: string; label: string }
+  | {
+      id: string;
+      kind: "tool_done";
+      name: string;
+      label: string;
+      summary: string;
+    };
 
 interface CommandCenterProps {
   initialMessages: ChatMessage[];
@@ -32,20 +56,18 @@ interface CommandCenterProps {
   hasApiKey: boolean;
 }
 
-// ---------------------------------------------------------------------------
-// Suggested starter prompts
-// ---------------------------------------------------------------------------
 const SUGGESTIONS = [
   "What can you help me with?",
-  "Summarise the JARVIS architecture",
+  "Create a task: Review quarterly report",
+  "What are my current dashboard stats?",
+  "What time is it right now?",
   "Write a LinkedIn post about AI productivity",
-  "Draft a weekly status update email",
-  "Explain the difference between MRR and ARR",
 ];
 
 // ---------------------------------------------------------------------------
 // Root component
 // ---------------------------------------------------------------------------
+
 export function CommandCenter({
   initialMessages,
   userName,
@@ -55,16 +77,20 @@ export function CommandCenter({
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hermesMode, setHermesMode] = useState(false);
+
+  // Hermes activity panel (cleared after each agent run)
+  const [activity, setActivity] = useState<ActivityItem[]>([]);
+  const [showActivity, setShowActivity] = useState(false);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const activityCounter = useRef(0);
 
-  // Auto-scroll to bottom when messages or loading state changes
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading]);
+  }, [messages, isLoading, activity]);
 
-  // Auto-resize textarea
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -72,20 +98,135 @@ export function CommandCenter({
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [input]);
 
-  // Focus textarea on mount
   useEffect(() => {
     textareaRef.current?.focus();
   }, []);
 
   // -------------------------------------------------------------------------
-  // Send — streaming version
+  // Unified SSE consumer — works for both /api/chat and /api/agent
+  // -------------------------------------------------------------------------
+  const consumeStream = useCallback(
+    async (res: Response, streamId: string, isAgent: boolean) => {
+      if (!res.body) throw new Error("No response body from server.");
+
+      // Add empty assistant message placeholder
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: streamId,
+          role: "assistant",
+          content: "",
+          createdAt: new Date().toISOString(),
+          streaming: true,
+        },
+      ]);
+      setIsLoading(false);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let finalTools: ToolRecord[] = [];
+
+      outer: while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const parts = buffer.split("\n\n");
+        buffer = parts.pop() ?? "";
+
+        for (const part of parts) {
+          const line = part.trim();
+          if (!line.startsWith("data: ")) continue;
+
+          let event: AgentEvent;
+          try {
+            event = JSON.parse(line.slice(6)) as AgentEvent;
+          } catch {
+            continue;
+          }
+
+          if (event.type === "error") {
+            throw new Error(event.message);
+          }
+
+          // Agent-specific events
+          if (isAgent) {
+            if (event.type === "status") {
+              activityCounter.current += 1;
+              setActivity((prev) => [
+                ...prev,
+                {
+                  id: `a-${activityCounter.current}`,
+                  kind: "status",
+                  message: event.message,
+                },
+              ]);
+            } else if (event.type === "tool_start") {
+              activityCounter.current += 1;
+              setActivity((prev) => [
+                ...prev,
+                {
+                  id: `a-${activityCounter.current}`,
+                  kind: "tool_start",
+                  name: event.name,
+                  label: event.label,
+                },
+              ]);
+            } else if (event.type === "tool_done") {
+              setActivity((prev) =>
+                prev.map((a) =>
+                  a.kind === "tool_start" && a.name === event.name
+                    ? {
+                        id: a.id,
+                        kind: "tool_done",
+                        name: event.name,
+                        label: event.label,
+                        summary: event.summary,
+                      }
+                    : a,
+                ),
+              );
+            }
+          }
+
+          if (event.type === "chunk") {
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === streamId
+                  ? { ...m, content: m.content + event.content }
+                  : m,
+              ),
+            );
+          }
+
+          if (event.type === "done") {
+            finalTools = event.tools ?? [];
+            setMessages((prev) =>
+              prev.map((m) =>
+                m.id === streamId
+                  ? { ...m, id: event.id, streaming: false, tools: finalTools }
+                  : m,
+              ),
+            );
+            setShowActivity(false);
+            setActivity([]);
+            break outer;
+          }
+        }
+      }
+    },
+    [],
+  );
+
+  // -------------------------------------------------------------------------
+  // Send message
   // -------------------------------------------------------------------------
   const sendMessage = useCallback(
     async (content: string) => {
       if (!content.trim() || isLoading) return;
       const trimmed = content.trim();
 
-      // 1. Optimistic user message
       const userMsgId = `user-${Date.now()}`;
       setMessages((prev) => [
         ...prev,
@@ -99,19 +240,25 @@ export function CommandCenter({
       setInput("");
       setIsLoading(true);
       setError(null);
+      activityCounter.current = 0;
+
+      if (hermesMode) {
+        setActivity([]);
+        setShowActivity(true);
+      }
+
       if (textareaRef.current) textareaRef.current.style.height = "auto";
 
-      // 2. Streaming assistant message placeholder
+      const endpoint = hermesMode ? "/api/agent" : "/api/chat";
       const streamId = `stream-${Date.now()}`;
 
       try {
-        const res = await fetch("/api/chat", {
+        const res = await fetch(endpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message: trimmed }),
         });
 
-        // Non-2xx before streaming starts → parse JSON error
         if (!res.ok) {
           const data = (await res.json().catch(() => ({}))) as {
             error?: string;
@@ -119,93 +266,25 @@ export function CommandCenter({
           throw new Error(data.error ?? `Server error ${res.status}`);
         }
 
-        if (!res.body) throw new Error("No response body from server.");
-
-        // 3. Add empty streaming message — typing indicator disappears
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: streamId,
-            role: "assistant",
-            content: "",
-            createdAt: new Date().toISOString(),
-            streaming: true,
-          },
-        ]);
-        setIsLoading(false); // hide typing indicator; streaming message visible instead
-
-        // 4. Consume SSE stream
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-
-        outer: while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-
-          buffer += decoder.decode(value, { stream: true });
-          const parts = buffer.split("\n\n");
-          buffer = parts.pop() ?? "";
-
-          for (const part of parts) {
-            const line = part.trim();
-            if (!line.startsWith("data: ")) continue;
-
-            let event: Record<string, unknown>;
-            try {
-              event = JSON.parse(line.slice(6)) as Record<string, unknown>;
-            } catch {
-              continue; // skip malformed lines
-            }
-
-            if (event.error) {
-              throw new Error(String(event.error));
-            }
-
-            if (!event.done && typeof event.chunk === "string") {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === streamId
-                    ? { ...m, content: m.content + event.chunk }
-                    : m,
-                ),
-              );
-            }
-
-            if (event.done) {
-              // Replace temp id with the real DB id
-              const realId = typeof event.id === "string" ? event.id : streamId;
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === streamId
-                    ? { ...m, id: realId, streaming: false }
-                    : m,
-                ),
-              );
-              break outer;
-            }
-          }
-        }
+        await consumeStream(res, streamId, hermesMode);
       } catch (err) {
         const msg =
           err instanceof Error ? err.message : "Something went wrong.";
         setError(msg);
-        // Roll back both the user message and the streaming placeholder
+        setIsLoading(false);
+        setShowActivity(false);
+        setActivity([]);
         setMessages((prev) =>
           prev.filter((m) => m.id !== userMsgId && m.id !== streamId),
         );
-        setIsLoading(false);
       } finally {
         setIsLoading(false);
         textareaRef.current?.focus();
       }
     },
-    [isLoading],
+    [isLoading, hermesMode, consumeStream],
   );
 
-  // -------------------------------------------------------------------------
-  // Keyboard handler
-  // -------------------------------------------------------------------------
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
@@ -218,22 +297,65 @@ export function CommandCenter({
     void sendMessage(input);
   };
 
-  // Is JARVIS currently streaming a response?
   const isStreaming = messages.some((m) => m.streaming);
   const inputDisabled = isLoading || isStreaming || !hasApiKey;
 
-  // -------------------------------------------------------------------------
-  // Render
-  // -------------------------------------------------------------------------
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      {/* Mode toggle bar */}
+      <div className="flex shrink-0 items-center gap-3 border-b border-[var(--glass-border)] px-4 py-2">
+        <span className="text-xs text-[var(--muted-foreground)]">Mode:</span>
+
+        <button
+          onClick={() => setHermesMode(false)}
+          className={cn(
+            "flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors",
+            !hermesMode
+              ? "bg-[var(--secondary)] text-[var(--foreground)]"
+              : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+          )}
+        >
+          {!hermesMode ? (
+            <ToggleRight className="text-neon size-3.5" />
+          ) : (
+            <ToggleLeft className="size-3.5" />
+          )}
+          Chat
+        </button>
+
+        <button
+          onClick={() => setHermesMode(true)}
+          className={cn(
+            "flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors",
+            hermesMode
+              ? "bg-[var(--primary)]/15 text-[var(--primary)]"
+              : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+          )}
+        >
+          <Cpu className={cn("size-3.5", hermesMode && "text-neon")} />
+          Hermes Agent
+          {hermesMode && (
+            <Badge variant="default" className="ml-1 py-0 text-[9px]">
+              ACTIVE
+            </Badge>
+          )}
+        </button>
+
+        {hermesMode && (
+          <p className="ml-auto text-[10px] text-[var(--muted-foreground)]">
+            Tools: create_task · get_stats · get_time · search_web
+          </p>
+        )}
+      </div>
+
       {/* Messages */}
       <ScrollArea className="flex-1">
         <div className="mx-auto max-w-3xl space-y-1 px-4 py-6">
-          {messages.length === 0 && (
+          {messages.length === 0 && !isLoading && (
             <EmptyState
               userName={userName}
               hasApiKey={hasApiKey}
+              hermesMode={hermesMode}
               onSuggestion={(s) => void sendMessage(s)}
             />
           )}
@@ -244,13 +366,19 @@ export function CommandCenter({
             ))}
           </AnimatePresence>
 
-          {/* Typing indicator — only while waiting for the FIRST chunk */}
-          {isLoading && !isStreaming && <TypingIndicator />}
+          {/* Typing indicator — while waiting for first chunk */}
+          {isLoading && !isStreaming && !showActivity && <TypingIndicator />}
+
+          {/* Hermes activity panel */}
+          <AnimatePresence>
+            {showActivity && activity.length > 0 && (
+              <AgentActivityPanel activity={activity} />
+            )}
+          </AnimatePresence>
 
           {error && (
             <ErrorBanner message={error} onDismiss={() => setError(null)} />
           )}
-
           <div ref={bottomRef} className="h-1" />
         </div>
       </ScrollArea>
@@ -267,20 +395,21 @@ export function CommandCenter({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
-              hasApiKey
-                ? "Ask JARVIS anything…  (Ctrl + Enter to send)"
-                : "Add GOOGLE_AI_API_KEY to .env.local to enable chat"
+              !hasApiKey
+                ? "Add GOOGLE_AI_API_KEY to .env.local to enable chat"
+                : hermesMode
+                  ? "Ask Hermes to take action…  (Ctrl + Enter to send)"
+                  : "Ask JARVIS anything…  (Ctrl + Enter to send)"
             }
             disabled={inputDisabled}
             rows={1}
             className={cn(
               "w-full resize-none rounded-xl border border-[var(--glass-border)]",
               "bg-[var(--secondary)]/40 px-4 py-3 text-sm text-[var(--foreground)]",
-              "placeholder:text-[var(--muted-foreground)]",
-              "transition-colors outline-none",
+              "transition-colors outline-none placeholder:text-[var(--muted-foreground)]",
               "focus:border-[var(--primary)]/60 focus:bg-[var(--secondary)]/60",
-              "disabled:cursor-not-allowed disabled:opacity-50",
-              "max-h-[200px] overflow-y-auto",
+              "max-h-[200px] overflow-y-auto disabled:cursor-not-allowed disabled:opacity-50",
+              hermesMode && "border-[var(--primary)]/20",
             )}
           />
           <Button
@@ -290,13 +419,82 @@ export function CommandCenter({
             className="mb-0.5 size-11 shrink-0 rounded-xl"
           >
             <Send className="size-4" />
-            <span className="sr-only">Send message</span>
+            <span className="sr-only">Send</span>
           </Button>
         </form>
-
         <p className="mx-auto mt-1.5 max-w-3xl text-center text-[10px] text-[var(--muted-foreground)]">
-          Responses stream in real time · Phase 7 adds tools &amp; memory
+          {hermesMode
+            ? "Hermes can take real actions · audit log captures all tool calls"
+            : "Responses stream in real time · switch to Hermes for tool use"}
         </p>
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Agent activity panel
+// ---------------------------------------------------------------------------
+
+function AgentActivityPanel({ activity }: { activity: ActivityItem[] }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -4 }}
+      className="my-2 flex items-start gap-3"
+    >
+      <div className="text-neon neon-glow mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--primary)]/10">
+        <Cpu className="size-3.5" />
+      </div>
+
+      <div className="flex-1 space-y-1.5 rounded-2xl rounded-tl-sm border border-[var(--primary)]/15 bg-[var(--secondary)]/40 px-4 py-3">
+        <p className="text-[10px] font-semibold tracking-widest text-[var(--primary)] uppercase">
+          Hermes · Thinking
+        </p>
+
+        {activity.map((item) => (
+          <ActivityRow key={item.id} item={item} />
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+function ActivityRow({ item }: { item: ActivityItem }) {
+  if (item.kind === "status") {
+    return (
+      <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+        <span className="size-1.5 animate-pulse rounded-full bg-[var(--primary)]" />
+        {item.message}
+      </div>
+    );
+  }
+
+  if (item.kind === "tool_start") {
+    return (
+      <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+        <Wrench className="size-3 animate-spin text-[var(--primary)]" />
+        Running{" "}
+        <span className="font-medium text-[var(--foreground)]">
+          {item.label}
+        </span>
+        …
+      </div>
+    );
+  }
+
+  // tool_done
+  return (
+    <div className="flex items-start gap-2 text-xs">
+      <CheckCircle2 className="mt-0.5 size-3 shrink-0 text-emerald-400" />
+      <div>
+        <span className="font-medium text-[var(--foreground)]">
+          {item.label}
+        </span>
+        <span className="ml-1 text-[var(--muted-foreground)]">
+          — {item.summary}
+        </span>
       </div>
     </div>
   );
@@ -305,13 +503,16 @@ export function CommandCenter({
 // ---------------------------------------------------------------------------
 // Empty state
 // ---------------------------------------------------------------------------
+
 function EmptyState({
   userName,
   hasApiKey,
+  hermesMode,
   onSuggestion,
 }: {
   userName: string;
   hasApiKey: boolean;
+  hermesMode: boolean;
   onSuggestion: (s: string) => void;
 }) {
   return (
@@ -321,14 +522,21 @@ function EmptyState({
       className="flex flex-col items-center gap-6 py-12 text-center"
     >
       <div className="neon-glow flex size-16 items-center justify-center rounded-2xl bg-[var(--primary)]/10">
-        <Zap className="text-neon size-8" />
+        {hermesMode ? (
+          <Cpu className="text-neon size-8" />
+        ) : (
+          <Zap className="text-neon size-8" />
+        )}
       </div>
+
       <div className="space-y-1">
         <h3 className="text-lg font-semibold text-[var(--foreground)]">
-          Hello, {userName}.
+          {hermesMode ? "Hermes Agent ready." : `Hello, ${userName}.`}
         </h3>
         <p className="text-sm text-[var(--muted-foreground)]">
-          How can I assist you today?
+          {hermesMode
+            ? "I can take real actions — create tasks, fetch stats, and more."
+            : "How can I assist you today?"}
         </p>
       </div>
 
@@ -348,7 +556,7 @@ function EmptyState({
               <code className="rounded bg-[var(--muted)] px-1 py-0.5">
                 .env.local
               </code>{" "}
-              and restart the dev server.
+              and restart.
             </p>
           </div>
         </div>
@@ -379,6 +587,7 @@ function EmptyState({
 // ---------------------------------------------------------------------------
 // Message bubble
 // ---------------------------------------------------------------------------
+
 function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
 
@@ -392,7 +601,6 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         isUser ? "flex-row-reverse" : "flex-row",
       )}
     >
-      {/* Avatar */}
       <div
         className={cn(
           "mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full",
@@ -404,7 +612,6 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         {isUser ? <User className="size-3.5" /> : <Zap className="size-3.5" />}
       </div>
 
-      {/* Bubble */}
       <div
         className={cn(
           "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
@@ -415,21 +622,36 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       >
         <MessageContent content={message.content} />
 
-        {/* Blinking cursor while streaming */}
         {message.streaming && (
           <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse rounded-full bg-[var(--primary)]" />
         )}
 
-        {/* Timestamp — only when done streaming */}
         {!message.streaming && (
-          <p
-            className={cn(
-              "mt-1.5 text-[10px] text-[var(--muted-foreground)]",
-              isUser ? "text-right" : "text-left",
+          <>
+            {/* Tool usage badges (Hermes mode) */}
+            {message.tools && message.tools.length > 0 && (
+              <div className="mt-2 flex flex-wrap gap-1">
+                {message.tools.map((t) => (
+                  <span
+                    key={t.name}
+                    className="flex items-center gap-1 rounded-full border border-[var(--primary)]/20 bg-[var(--primary)]/10 px-1.5 py-0.5 text-[9px] text-[var(--primary)]"
+                  >
+                    <Wrench className="size-2.5" />
+                    {t.label}
+                  </span>
+                ))}
+              </div>
             )}
-          >
-            {formatTime(message.createdAt)}
-          </p>
+
+            <p
+              className={cn(
+                "mt-1.5 text-[10px] text-[var(--muted-foreground)]",
+                isUser ? "text-right" : "text-left",
+              )}
+            >
+              {formatTime(message.createdAt)}
+            </p>
+          </>
         )}
       </div>
     </motion.div>
@@ -437,19 +659,18 @@ function MessageBubble({ message }: { message: ChatMessage }) {
 }
 
 // ---------------------------------------------------------------------------
-// Message content renderer
+// Message content — handles fenced code blocks
 // ---------------------------------------------------------------------------
-function MessageContent({ content }: { content: string }) {
-  // Split on fenced code blocks (``` ... ```)
-  const parts = content.split(/(```[\s\S]*?```)/g);
 
+function MessageContent({ content }: { content: string }) {
+  const parts = content.split(/(```[\s\S]*?```)/g);
   return (
     <div className="space-y-2">
       {parts.map((part, i) => {
         if (part.startsWith("```") && part.endsWith("```")) {
           const inner = part.slice(3, -3);
-          const newline = inner.indexOf("\n");
-          const code = newline > -1 ? inner.slice(newline + 1) : inner;
+          const nl = inner.indexOf("\n");
+          const code = nl > -1 ? inner.slice(nl + 1) : inner;
           return (
             <pre
               key={i}
@@ -470,8 +691,9 @@ function MessageContent({ content }: { content: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Typing indicator (shown while waiting for the first stream chunk)
+// Typing indicator
 // ---------------------------------------------------------------------------
+
 function TypingIndicator() {
   return (
     <motion.div
@@ -499,6 +721,7 @@ function TypingIndicator() {
 // ---------------------------------------------------------------------------
 // Error banner
 // ---------------------------------------------------------------------------
+
 function ErrorBanner({
   message,
   onDismiss,
@@ -527,6 +750,7 @@ function ErrorBanner({
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
 function formatTime(iso: string): string {
   try {
     return new Date(iso).toLocaleTimeString(undefined, {
