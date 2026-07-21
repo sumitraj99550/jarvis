@@ -1,56 +1,65 @@
 /**
- * Hermes Orchestration Layer — Shared Types
+ * Hermes Orchestration Layer — Shared Types (Phase 8 update)
  *
- * These types are used by three consumers:
- *  1. src/lib/hermes/agent.ts  — emits AgentEvents via a callback
- *  2. src/app/api/agent/route.ts — serialises AgentEvents as SSE
- *  3. src/components/command/command-center.tsx — deserialises and renders them
+ * Added:
+ *  - ApprovalRequiredEvent  — emitted when a high-risk tool is pending approval
+ *  - PendingApprovalData    — payload the route stores in audit_logs
+ *  - RiskLevel re-export    — so consumers only need to import from types
  */
+
+export type { RiskLevel } from "./risk";
 
 // ---------------------------------------------------------------------------
 // SSE event discriminated union
 // ---------------------------------------------------------------------------
 
-/** Agent is thinking / routing */
 export type StatusEvent = {
   type: "status";
   message: string;
 };
 
-/** A tool call has started */
 export type ToolStartEvent = {
   type: "tool_start";
   name: string;
-  /** Human-readable label, e.g. "Create task" */
   label: string;
 };
 
-/** A tool call has completed */
 export type ToolDoneEvent = {
   type: "tool_done";
   name: string;
   label: string;
-  /** One-line summary of what happened, e.g. "Task created: Write report" */
   summary: string;
 };
 
-/** A text chunk from the final response (streaming) */
 export type ChunkEvent = {
   type: "chunk";
   content: string;
 };
 
-/** Stream is complete — carry DB id + tool run log */
 export type DoneEvent = {
   type: "done";
   id: string;
   tools: ToolRecord[];
 };
 
-/** An error occurred during the agent run */
 export type ErrorEvent = {
   type: "error";
   message: string;
+};
+
+/**
+ * Emitted when the agent detects a high-risk tool call and pauses for
+ * human approval. The stream ends after this event (no `done` event).
+ * The client must call POST /api/agent/approve to resume or cancel.
+ */
+export type ApprovalRequiredEvent = {
+  type: "approval_required";
+  auditLogId: string;
+  toolName: string;
+  toolLabel: string;
+  riskLevel: string;
+  description: string;
+  args: Record<string, unknown>;
 };
 
 export type AgentEvent =
@@ -59,10 +68,11 @@ export type AgentEvent =
   | ToolDoneEvent
   | ChunkEvent
   | DoneEvent
-  | ErrorEvent;
+  | ErrorEvent
+  | ApprovalRequiredEvent;
 
 // ---------------------------------------------------------------------------
-// Tool record — persisted in AuditLog payload
+// Tool record — persisted in AuditLog payload and returned in DoneEvent
 // ---------------------------------------------------------------------------
 
 export type ToolRecord = {
@@ -77,4 +87,17 @@ export type ToolRecord = {
 
 export type ToolContext = {
   userId: string;
+};
+
+// ---------------------------------------------------------------------------
+// Data stored in audit_logs.payload for pending approvals
+// ---------------------------------------------------------------------------
+
+export type PendingApprovalData = {
+  toolName: string;
+  toolLabel: string;
+  args: Record<string, unknown>;
+  riskLevel: string;
+  description: string;
+  userMessage: string;
 };

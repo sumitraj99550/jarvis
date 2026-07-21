@@ -23,6 +23,11 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  ApprovalCard,
+  ApprovalResultCard,
+  type PendingApproval,
+} from "./approval-card";
 import type { AgentEvent, ToolRecord } from "@/lib/hermes/types";
 
 // ---------------------------------------------------------------------------
@@ -35,8 +40,9 @@ export type ChatMessage = {
   content: string;
   createdAt: string;
   streaming?: boolean;
-  /** Tools used (Hermes mode only) */
   tools?: ToolRecord[];
+  /** Marks this message as the result of an approval action */
+  approvalResult?: "executed" | "rejected";
 };
 
 type ActivityItem =
@@ -61,7 +67,7 @@ const SUGGESTIONS = [
   "Create a task: Review quarterly report",
   "What are my current dashboard stats?",
   "What time is it right now?",
-  "Write a LinkedIn post about AI productivity",
+  "Clear all my tasks",
 ];
 
 // ---------------------------------------------------------------------------
@@ -78,10 +84,10 @@ export function CommandCenter({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [hermesMode, setHermesMode] = useState(false);
-
-  // Hermes activity panel (cleared after each agent run)
   const [activity, setActivity] = useState<ActivityItem[]>([]);
   const [showActivity, setShowActivity] = useState(false);
+  const [pendingApproval, setPendingApproval] =
+    useState<PendingApproval | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -89,7 +95,7 @@ export function CommandCenter({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isLoading, activity]);
+  }, [messages, isLoading, activity, pendingApproval]);
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -103,13 +109,12 @@ export function CommandCenter({
   }, []);
 
   // -------------------------------------------------------------------------
-  // Unified SSE consumer — works for both /api/chat and /api/agent
+  // Unified SSE consumer (/api/chat and /api/agent share the same format)
   // -------------------------------------------------------------------------
   const consumeStream = useCallback(
     async (res: Response, streamId: string, isAgent: boolean) => {
-      if (!res.body) throw new Error("No response body from server.");
+      if (!res.body) throw new Error("No response body.");
 
-      // Add empty assistant message placeholder
       setMessages((prev) => [
         ...prev,
         {
@@ -146,11 +151,8 @@ export function CommandCenter({
             continue;
           }
 
-          if (event.type === "error") {
-            throw new Error(event.message);
-          }
+          if (event.type === "error") throw new Error(event.message);
 
-          // Agent-specific events
           if (isAgent) {
             if (event.type === "status") {
               activityCounter.current += 1;
@@ -188,6 +190,23 @@ export function CommandCenter({
                 ),
               );
             }
+
+            // Phase 8: approval gate — pause here and show the ApprovalCard
+            if (event.type === "approval_required") {
+              // Remove the empty streaming placeholder (no content yet)
+              setMessages((prev) => prev.filter((m) => m.id !== streamId));
+              setShowActivity(false);
+              setActivity([]);
+              setPendingApproval({
+                auditLogId: event.auditLogId,
+                toolName: event.toolName,
+                toolLabel: event.toolLabel,
+                riskLevel: event.riskLevel,
+                description: event.description,
+                args: event.args,
+              });
+              break outer;
+            }
           }
 
           if (event.type === "chunk") {
@@ -220,11 +239,76 @@ export function CommandCenter({
   );
 
   // -------------------------------------------------------------------------
+  // Approve / Reject handlers
+  // -------------------------------------------------------------------------
+  const handleApprove = useCallback(async (auditLogId: string) => {
+    try {
+      const res = await fetch("/api/agent/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auditLogId }),
+      });
+      const data = (await res.json()) as {
+        executed?: boolean;
+        response?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error ?? "Approval failed.");
+
+      setPendingApproval(null);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `approved-${Date.now()}`,
+          role: "assistant",
+          content: data.response ?? "Action completed.",
+          createdAt: new Date().toISOString(),
+          approvalResult: "executed",
+        },
+      ]);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Approval request failed.");
+    }
+  }, []);
+
+  const handleReject = useCallback(async (auditLogId: string) => {
+    try {
+      const res = await fetch("/api/agent/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ auditLogId, reject: true }),
+      });
+      const data = (await res.json()) as {
+        rejected?: boolean;
+        response?: string;
+        error?: string;
+      };
+      if (!res.ok) throw new Error(data.error ?? "Rejection failed.");
+
+      setPendingApproval(null);
+      setMessages((prev) => [
+        ...prev,
+        {
+          id: `rejected-${Date.now()}`,
+          role: "assistant",
+          content: data.response ?? "Action cancelled.",
+          createdAt: new Date().toISOString(),
+          approvalResult: "rejected",
+        },
+      ]);
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Rejection request failed.",
+      );
+    }
+  }, []);
+
+  // -------------------------------------------------------------------------
   // Send message
   // -------------------------------------------------------------------------
   const sendMessage = useCallback(
     async (content: string) => {
-      if (!content.trim() || isLoading) return;
+      if (!content.trim() || isLoading || pendingApproval) return;
       const trimmed = content.trim();
 
       const userMsgId = `user-${Date.now()}`;
@@ -246,14 +330,12 @@ export function CommandCenter({
         setActivity([]);
         setShowActivity(true);
       }
-
       if (textareaRef.current) textareaRef.current.style.height = "auto";
 
-      const endpoint = hermesMode ? "/api/agent" : "/api/chat";
       const streamId = `stream-${Date.now()}`;
 
       try {
-        const res = await fetch(endpoint, {
+        const res = await fetch(hermesMode ? "/api/agent" : "/api/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ message: trimmed }),
@@ -282,7 +364,7 @@ export function CommandCenter({
         textareaRef.current?.focus();
       }
     },
-    [isLoading, hermesMode, consumeStream],
+    [isLoading, hermesMode, pendingApproval, consumeStream],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -291,23 +373,25 @@ export function CommandCenter({
       void sendMessage(input);
     }
   };
-
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     void sendMessage(input);
   };
 
   const isStreaming = messages.some((m) => m.streaming);
-  const inputDisabled = isLoading || isStreaming || !hasApiKey;
+  const inputDisabled =
+    isLoading || isStreaming || !hasApiKey || pendingApproval !== null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
-      {/* Mode toggle bar */}
+      {/* Mode toggle */}
       <div className="flex shrink-0 items-center gap-3 border-b border-[var(--glass-border)] px-4 py-2">
         <span className="text-xs text-[var(--muted-foreground)]">Mode:</span>
-
         <button
-          onClick={() => setHermesMode(false)}
+          onClick={() => {
+            setHermesMode(false);
+            setPendingApproval(null);
+          }}
           className={cn(
             "flex items-center gap-1.5 rounded-full px-3 py-1 text-xs transition-colors",
             !hermesMode
@@ -322,7 +406,6 @@ export function CommandCenter({
           )}
           Chat
         </button>
-
         <button
           onClick={() => setHermesMode(true)}
           className={cn(
@@ -340,10 +423,9 @@ export function CommandCenter({
             </Badge>
           )}
         </button>
-
         {hermesMode && (
           <p className="ml-auto text-[10px] text-[var(--muted-foreground)]">
-            Tools: create_task · get_stats · get_time · search_web
+            Phase 8: high-risk actions require approval
           </p>
         )}
       </div>
@@ -351,7 +433,7 @@ export function CommandCenter({
       {/* Messages */}
       <ScrollArea className="flex-1">
         <div className="mx-auto max-w-3xl space-y-1 px-4 py-6">
-          {messages.length === 0 && !isLoading && (
+          {messages.length === 0 && !isLoading && !pendingApproval && (
             <EmptyState
               userName={userName}
               hasApiKey={hasApiKey}
@@ -361,18 +443,37 @@ export function CommandCenter({
           )}
 
           <AnimatePresence initial={false}>
-            {messages.map((msg) => (
-              <MessageBubble key={msg.id} message={msg} />
-            ))}
+            {messages.map((msg) =>
+              msg.approvalResult ? (
+                <ApprovalResultCard
+                  key={msg.id}
+                  message={msg}
+                  executed={msg.approvalResult === "executed"}
+                />
+              ) : (
+                <MessageBubble key={msg.id} message={msg} />
+              ),
+            )}
           </AnimatePresence>
 
-          {/* Typing indicator — while waiting for first chunk */}
           {isLoading && !isStreaming && !showActivity && <TypingIndicator />}
 
-          {/* Hermes activity panel */}
           <AnimatePresence>
             {showActivity && activity.length > 0 && (
               <AgentActivityPanel activity={activity} />
+            )}
+          </AnimatePresence>
+
+          {/* Phase 8: Approval card */}
+          <AnimatePresence>
+            {pendingApproval && (
+              <ApprovalCard
+                key={pendingApproval.auditLogId}
+                approval={pendingApproval}
+                onApprove={handleApprove}
+                onReject={handleReject}
+                disabled={isLoading}
+              />
             )}
           </AnimatePresence>
 
@@ -395,11 +496,13 @@ export function CommandCenter({
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             placeholder={
-              !hasApiKey
-                ? "Add GOOGLE_AI_API_KEY to .env.local to enable chat"
-                : hermesMode
-                  ? "Ask Hermes to take action…  (Ctrl + Enter to send)"
-                  : "Ask JARVIS anything…  (Ctrl + Enter to send)"
+              pendingApproval
+                ? "Waiting for your approval above…"
+                : !hasApiKey
+                  ? "Add GOOGLE_AI_API_KEY to .env.local to enable chat"
+                  : hermesMode
+                    ? "Ask Hermes to take action…  (Ctrl + Enter to send)"
+                    : "Ask JARVIS anything…  (Ctrl + Enter to send)"
             }
             disabled={inputDisabled}
             rows={1}
@@ -409,7 +512,7 @@ export function CommandCenter({
               "transition-colors outline-none placeholder:text-[var(--muted-foreground)]",
               "focus:border-[var(--primary)]/60 focus:bg-[var(--secondary)]/60",
               "max-h-[200px] overflow-y-auto disabled:cursor-not-allowed disabled:opacity-50",
-              hermesMode && "border-[var(--primary)]/20",
+              hermesMode && !pendingApproval && "border-[var(--primary)]/20",
             )}
           />
           <Button
@@ -423,9 +526,11 @@ export function CommandCenter({
           </Button>
         </form>
         <p className="mx-auto mt-1.5 max-w-3xl text-center text-[10px] text-[var(--muted-foreground)]">
-          {hermesMode
-            ? "Hermes can take real actions · audit log captures all tool calls"
-            : "Responses stream in real time · switch to Hermes for tool use"}
+          {pendingApproval
+            ? "Input locked — approve or reject the action above to continue"
+            : hermesMode
+              ? "High-risk actions pause for your approval · All tool calls logged to audit trail"
+              : "Responses stream in real time · switch to Hermes for tool use"}
         </p>
       </div>
     </div>
@@ -433,75 +538,7 @@ export function CommandCenter({
 }
 
 // ---------------------------------------------------------------------------
-// Agent activity panel
-// ---------------------------------------------------------------------------
-
-function AgentActivityPanel({ activity }: { activity: ActivityItem[] }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, y: 8 }}
-      animate={{ opacity: 1, y: 0 }}
-      exit={{ opacity: 0, y: -4 }}
-      className="my-2 flex items-start gap-3"
-    >
-      <div className="text-neon neon-glow mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--primary)]/10">
-        <Cpu className="size-3.5" />
-      </div>
-
-      <div className="flex-1 space-y-1.5 rounded-2xl rounded-tl-sm border border-[var(--primary)]/15 bg-[var(--secondary)]/40 px-4 py-3">
-        <p className="text-[10px] font-semibold tracking-widest text-[var(--primary)] uppercase">
-          Hermes · Thinking
-        </p>
-
-        {activity.map((item) => (
-          <ActivityRow key={item.id} item={item} />
-        ))}
-      </div>
-    </motion.div>
-  );
-}
-
-function ActivityRow({ item }: { item: ActivityItem }) {
-  if (item.kind === "status") {
-    return (
-      <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
-        <span className="size-1.5 animate-pulse rounded-full bg-[var(--primary)]" />
-        {item.message}
-      </div>
-    );
-  }
-
-  if (item.kind === "tool_start") {
-    return (
-      <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
-        <Wrench className="size-3 animate-spin text-[var(--primary)]" />
-        Running{" "}
-        <span className="font-medium text-[var(--foreground)]">
-          {item.label}
-        </span>
-        …
-      </div>
-    );
-  }
-
-  // tool_done
-  return (
-    <div className="flex items-start gap-2 text-xs">
-      <CheckCircle2 className="mt-0.5 size-3 shrink-0 text-emerald-400" />
-      <div>
-        <span className="font-medium text-[var(--foreground)]">
-          {item.label}
-        </span>
-        <span className="ml-1 text-[var(--muted-foreground)]">
-          — {item.summary}
-        </span>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Empty state
+// Sub-components
 // ---------------------------------------------------------------------------
 
 function EmptyState({
@@ -528,40 +565,32 @@ function EmptyState({
           <Zap className="text-neon size-8" />
         )}
       </div>
-
       <div className="space-y-1">
         <h3 className="text-lg font-semibold text-[var(--foreground)]">
           {hermesMode ? "Hermes Agent ready." : `Hello, ${userName}.`}
         </h3>
         <p className="text-sm text-[var(--muted-foreground)]">
           {hermesMode
-            ? "I can take real actions — create tasks, fetch stats, and more."
+            ? "High-risk actions will pause and ask for your approval."
             : "How can I assist you today?"}
         </p>
       </div>
-
       {!hasApiKey && (
         <div className="glass-panel flex max-w-sm items-start gap-3 p-4 text-left">
           <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-400" />
-          <div>
-            <p className="text-sm font-medium text-amber-400">
-              API key not configured
-            </p>
-            <p className="mt-0.5 text-xs text-[var(--muted-foreground)]">
-              Add{" "}
-              <code className="rounded bg-[var(--muted)] px-1 py-0.5">
-                GOOGLE_AI_API_KEY
-              </code>{" "}
-              to{" "}
-              <code className="rounded bg-[var(--muted)] px-1 py-0.5">
-                .env.local
-              </code>{" "}
-              and restart.
-            </p>
-          </div>
+          <p className="text-xs text-[var(--muted-foreground)]">
+            Add{" "}
+            <code className="rounded bg-[var(--muted)] px-1 py-0.5">
+              GOOGLE_AI_API_KEY
+            </code>{" "}
+            to{" "}
+            <code className="rounded bg-[var(--muted)] px-1 py-0.5">
+              .env.local
+            </code>{" "}
+            and restart.
+          </p>
         </div>
       )}
-
       {hasApiKey && (
         <div className="flex max-w-lg flex-wrap justify-center gap-2">
           {SUGGESTIONS.map((s) => (
@@ -569,10 +598,7 @@ function EmptyState({
               key={s}
               onClick={() => onSuggestion(s)}
               className={cn(
-                "rounded-full border border-[var(--glass-border)] bg-[var(--secondary)]/40",
-                "px-3 py-1.5 text-xs text-[var(--muted-foreground)]",
-                "transition-colors hover:border-[var(--primary)]/40",
-                "hover:bg-[var(--primary)]/10 hover:text-[var(--foreground)]",
+                "rounded-full border border-[var(--glass-border)] bg-[var(--secondary)]/40 px-3 py-1.5 text-xs text-[var(--muted-foreground)] transition-colors hover:border-[var(--primary)]/40 hover:bg-[var(--primary)]/10 hover:text-[var(--foreground)]",
               )}
             >
               {s}
@@ -584,13 +610,65 @@ function EmptyState({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Message bubble
-// ---------------------------------------------------------------------------
+function AgentActivityPanel({ activity }: { activity: ActivityItem[] }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 8 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -4 }}
+      className="my-2 flex items-start gap-3"
+    >
+      <div className="text-neon neon-glow mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-full bg-[var(--primary)]/10">
+        <Cpu className="size-3.5" />
+      </div>
+      <div className="flex-1 space-y-1.5 rounded-2xl rounded-tl-sm border border-[var(--primary)]/15 bg-[var(--secondary)]/40 px-4 py-3">
+        <p className="text-[10px] font-semibold tracking-widest text-[var(--primary)] uppercase">
+          Hermes · Thinking
+        </p>
+        {activity.map((item) => (
+          <ActivityRow key={item.id} item={item} />
+        ))}
+      </div>
+    </motion.div>
+  );
+}
+
+function ActivityRow({ item }: { item: ActivityItem }) {
+  if (item.kind === "status")
+    return (
+      <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+        <span className="size-1.5 animate-pulse rounded-full bg-[var(--primary)]" />
+        {item.message}
+      </div>
+    );
+  if (item.kind === "tool_start")
+    return (
+      <div className="flex items-center gap-2 text-xs text-[var(--muted-foreground)]">
+        <Wrench className="size-3 animate-spin text-[var(--primary)]" />
+        Running{" "}
+        <span className="font-medium text-[var(--foreground)]">
+          {item.label}
+        </span>
+        …
+      </div>
+    );
+  return (
+    <div className="flex items-start gap-2 text-xs">
+      <CheckCircle2 className="mt-0.5 size-3 shrink-0 text-emerald-400" />
+      <div>
+        <span className="font-medium text-[var(--foreground)]">
+          {item.label}
+        </span>
+        <span className="ml-1 text-[var(--muted-foreground)]">
+          — {item.summary}
+        </span>
+      </div>
+    </div>
+  );
+}
 
 function MessageBubble({ message }: { message: ChatMessage }) {
   const isUser = message.role === "user";
-
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -611,7 +689,6 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       >
         {isUser ? <User className="size-3.5" /> : <Zap className="size-3.5" />}
       </div>
-
       <div
         className={cn(
           "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
@@ -621,14 +698,11 @@ function MessageBubble({ message }: { message: ChatMessage }) {
         )}
       >
         <MessageContent content={message.content} />
-
         {message.streaming && (
           <span className="ml-0.5 inline-block h-3.5 w-0.5 animate-pulse rounded-full bg-[var(--primary)]" />
         )}
-
         {!message.streaming && (
           <>
-            {/* Tool usage badges (Hermes mode) */}
             {message.tools && message.tools.length > 0 && (
               <div className="mt-2 flex flex-wrap gap-1">
                 {message.tools.map((t) => (
@@ -642,7 +716,6 @@ function MessageBubble({ message }: { message: ChatMessage }) {
                 ))}
               </div>
             )}
-
             <p
               className={cn(
                 "mt-1.5 text-[10px] text-[var(--muted-foreground)]",
@@ -657,10 +730,6 @@ function MessageBubble({ message }: { message: ChatMessage }) {
     </motion.div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Message content — handles fenced code blocks
-// ---------------------------------------------------------------------------
 
 function MessageContent({ content }: { content: string }) {
   const parts = content.split(/(```[\s\S]*?```)/g);
@@ -690,10 +759,6 @@ function MessageContent({ content }: { content: string }) {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Typing indicator
-// ---------------------------------------------------------------------------
-
 function TypingIndicator() {
   return (
     <motion.div
@@ -717,10 +782,6 @@ function TypingIndicator() {
     </motion.div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Error banner
-// ---------------------------------------------------------------------------
 
 function ErrorBanner({
   message,
@@ -746,10 +807,6 @@ function ErrorBanner({
     </motion.div>
   );
 }
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 function formatTime(iso: string): string {
   try {

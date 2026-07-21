@@ -20,7 +20,7 @@ A production-quality AI Operating System dashboard built incrementally over 20 p
 
 ```bash
 # 1. Install dependencies (also runs prisma generate)
-npm install
+c:\Users\sumit\Downloads\jarvis-phase8\jarvis\.env.example c:\Users\sumit\Downloads\jarvis-phase8\jarvis\.gitignore c:\Users\sumit\Downloads\jarvis-phase8\jarvis\.prettierignore c:\Users\sumit\Downloads\jarvis-phase8\jarvis\.prettierrc c:\Users\sumit\Downloads\jarvis-phase8\jarvis\AGENTS.md c:\Users\sumit\Downloads\jarvis-phase8\jarvis\CLAUDE.md c:\Users\sumit\Downloads\jarvis-phase8\jarvis\components.json c:\Users\sumit\Downloads\jarvis-phase8\jarvis\docker-compose.yml c:\Users\sumit\Downloads\jarvis-phase8\jarvis\eslint.config.mjs c:\Users\sumit\Downloads\jarvis-phase8\jarvis\next.config.mjs c:\Users\sumit\Downloads\jarvis-phase8\jarvis\next-env.d.ts c:\Users\sumit\Downloads\jarvis-phase8\jarvis\package.json c:\Users\sumit\Downloads\jarvis-phase8\jarvis\package-lock.json c:\Users\sumit\Downloads\jarvis-phase8\jarvis\postcss.config.mjs c:\Users\sumit\Downloads\jarvis-phase8\jarvis\prisma.config.ts c:\Users\sumit\Downloads\jarvis-phase8\jarvis\README.md c:\Users\sumit\Downloads\jarvis-phase8\jarvis\tsconfig.json c:\Users\sumit\Downloads\jarvis-phase8\jarvis\public c:\Users\sumit\Downloads\jarvis-phase8\jarvis\src c:\Users\sumit\Downloads\jarvis-phase8\jarvis\prisma
 
 # 2. Start local database
 docker compose up -d

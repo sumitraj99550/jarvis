@@ -4,14 +4,13 @@ import { HermesAgent } from "@/lib/hermes/agent";
 import { getCurrentDbUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import type { ChatTurn } from "@/lib/ai";
-import type { AgentEvent } from "@/lib/hermes/types";
+import type { AgentEvent, PendingApprovalData } from "@/lib/hermes/types";
 
 const MAX_CONTEXT_TURNS = 10;
 const MAX_MESSAGE_LENGTH = 4000;
 
 const enc = new TextEncoder();
 
-/** Serialise any AgentEvent to an SSE data line */
 function sse(event: AgentEvent): Uint8Array {
   return enc.encode(`data: ${JSON.stringify(event)}\n\n`);
 }
@@ -36,22 +35,15 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // -------------------------------------------------------------------------
-  // 2. API key guard
-  // -------------------------------------------------------------------------
   if (!process.env.GOOGLE_AI_API_KEY) {
     return new Response(
-      JSON.stringify({
-        error:
-          "GOOGLE_AI_API_KEY is not configured. " +
-          "Get a free key at https://aistudio.google.com/apikey",
-      }),
+      JSON.stringify({ error: "GOOGLE_AI_API_KEY is not configured." }),
       { status: 503, headers: { "Content-Type": "application/json" } },
     );
   }
 
   // -------------------------------------------------------------------------
-  // 3. Parse body
+  // 2. Parse body
   // -------------------------------------------------------------------------
   let message: string;
   try {
@@ -77,7 +69,7 @@ export async function POST(req: NextRequest) {
   }
 
   // -------------------------------------------------------------------------
-  // 4. Load conversation history
+  // 3. Load conversation history
   // -------------------------------------------------------------------------
   const history = await db.conversation.findMany({
     where: { userId: user.id },
@@ -95,47 +87,76 @@ export async function POST(req: NextRequest) {
   );
 
   // -------------------------------------------------------------------------
-  // 5. Run Hermes agent, streaming events to the client
+  // 4. Run Hermes agent with SSE streaming
   // -------------------------------------------------------------------------
   const agent = new HermesAgent(process.env.GOOGLE_AI_API_KEY);
 
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        // The agent calls onEvent for every status / tool / chunk update.
-        // We forward each event straight to the SSE stream.
-        const { finalText, tools } = await agent.run(
+        const { finalText, tools, pendingApproval } = await agent.run(
           message,
           contextTurns,
           { userId: user.id },
           (event) => controller.enqueue(sse(event)),
         );
 
-        // Stream the final text response in small chunks for a typing effect
-        const CHUNK_SIZE = 6; // characters per SSE chunk
-        for (let i = 0; i < finalText.length; i += CHUNK_SIZE) {
+        // -------------------------------------------------------------------
+        // Phase 8: High-risk tool detected — pause for human approval
+        // -------------------------------------------------------------------
+        if (pendingApproval) {
+          const data = pendingApproval as PendingApprovalData;
+
+          // Persist the pending action so the approve route can resume it
+          const auditLog = await db.auditLog.create({
+            data: {
+              userId: user.id,
+              action: `hermes.${data.toolName}`,
+              payload: data as unknown as Record<string, unknown>,
+              status: "pending_approval",
+            },
+          });
+
           controller.enqueue(
             sse({
-              type: "chunk",
-              content: finalText.slice(i, i + CHUNK_SIZE),
+              type: "approval_required",
+              auditLogId: auditLog.id,
+              toolName: data.toolName,
+              toolLabel: data.toolLabel,
+              riskLevel: data.riskLevel,
+              description: data.description,
+              args: data.args,
             }),
           );
-          // Tiny delay — gives the browser a chance to paint each chunk
+
+          // Stream ends here — no `done` event.
+          // The client shows the ApprovalCard; the conversation resumes
+          // when the user clicks Approve or Reject.
+          controller.close();
+          return;
+        }
+
+        // -------------------------------------------------------------------
+        // Normal completion — stream final response and close
+        // -------------------------------------------------------------------
+        const CHUNK_SIZE = 6;
+        for (let i = 0; i < finalText.length; i += CHUNK_SIZE) {
+          controller.enqueue(
+            sse({ type: "chunk", content: finalText.slice(i, i + CHUNK_SIZE) }),
+          );
           await new Promise((r) => setTimeout(r, 12));
         }
 
-        // Persist the completed conversation turn
         const saved = await db.conversation.create({
           data: { userId: user.id, message, response: finalText },
         });
 
-        // Audit log for tool usage (Phase 8 will expand this)
         if (tools.length > 0) {
           await db.auditLog.create({
             data: {
               userId: user.id,
               action: `hermes.${tools.map((t) => t.name).join("+")}`,
-              payload: { message, tools },
+              payload: { message, tools } as unknown as Record<string, unknown>,
               status: "executed",
             },
           });

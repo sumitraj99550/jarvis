@@ -6,13 +6,21 @@ import {
 } from "@google/generative-ai";
 import { AI_MODEL, type ChatTurn } from "@/lib/ai";
 import { TOOL_DECLARATIONS, executeTool } from "./tools";
-import type { AgentEvent, ToolRecord, ToolContext } from "./types";
+import {
+  requiresApproval,
+  getRiskLevel,
+  TOOL_APPROVAL_DESCRIPTIONS,
+} from "./risk";
+import type {
+  AgentEvent,
+  ToolRecord,
+  ToolContext,
+  PendingApprovalData,
+} from "./types";
 
 // ---------------------------------------------------------------------------
 // Hermes system prompt
 // ---------------------------------------------------------------------------
-// Separate from the base JARVIS prompt so we can tune the agent's tool-use
-// behaviour independently from the conversational chat mode.
 
 const HERMES_SYSTEM_PROMPT = `\
 You are JARVIS Hermes, the intelligent orchestration layer of the JARVIS AI \
@@ -23,13 +31,29 @@ Available tools:
 - create_task      : Create a task for the user
 - get_system_stats : Fetch live JARVIS dashboard metrics
 - get_current_time : Get the current date and time
-- search_web       : Search the web (Phase 10 stub — inform the user if used)
+- search_web       : Search the web (Phase 10 stub)
+- clear_all_tasks  : ⚠ Permanently delete ALL tasks (requires human approval)
 
 Guidelines:
 - Use tools when they add value; respond directly for simple questions
 - After using tools, provide a concise, helpful response based on the results
 - Always confirm the action taken when you use a tool
 - Be direct and professional — you are an executive AI assistant`;
+
+// ---------------------------------------------------------------------------
+// Return type
+// ---------------------------------------------------------------------------
+
+export type AgentResult = {
+  finalText: string;
+  tools: ToolRecord[];
+  /**
+   * Set when the agent paused because a high-risk tool needs human approval.
+   * The route is responsible for creating the audit_log row and emitting
+   * the `approval_required` SSE event.
+   */
+  pendingApproval?: PendingApprovalData;
+};
 
 // ---------------------------------------------------------------------------
 // HermesAgent
@@ -42,23 +66,12 @@ export class HermesAgent {
     this.genAI = new GoogleGenerativeAI(apiKey);
   }
 
-  /**
-   * Run the agentic loop for a single user turn.
-   *
-   * @param message   Current user message
-   * @param history   Previous conversation turns (for context)
-   * @param ctx       Per-request context (userId, etc.)
-   * @param onEvent   Callback fired for each AgentEvent — use this to stream
-   *                  status/tool/chunk events to the client in real time
-   *
-   * @returns { finalText, tools } — the completed response and tool log
-   */
   async run(
     message: string,
     history: ChatTurn[],
     ctx: ToolContext,
     onEvent: (event: AgentEvent) => void | Promise<void>,
-  ): Promise<{ finalText: string; tools: ToolRecord[] }> {
+  ): Promise<AgentResult> {
     const tools: ToolRecord[] = [];
 
     await onEvent({ type: "status", message: "Analyzing intent…" });
@@ -68,29 +81,16 @@ export class HermesAgent {
       systemInstruction: HERMES_SYSTEM_PROMPT,
       tools: [{ functionDeclarations: TOOL_DECLARATIONS }],
       toolConfig: {
-        functionCallingConfig: {
-          // AUTO: Gemini decides whether to call a function or respond directly
-          mode: FunctionCallingMode.AUTO,
-        },
+        functionCallingConfig: { mode: FunctionCallingMode.AUTO },
       },
     });
 
-    // Convert our flat ChatTurn[] to Gemini's Content[] format
     const geminiHistory: Content[] = history.flatMap((t) => ({
       role: t.role === "assistant" ? "model" : "user",
       parts: [{ text: t.content }],
     }));
 
     const chat = model.startChat({ history: geminiHistory });
-
-    // -----------------------------------------------------------------
-    // Agentic loop
-    // -----------------------------------------------------------------
-    // Each iteration either:
-    //   A) Gets a text response → we're done
-    //   B) Gets function calls → execute them, send results, repeat
-    //
-    // Capped at MAX_ROUNDS to prevent runaway loops.
 
     const MAX_ROUNDS = 5;
     let currentParts: Part[] = [{ text: message }];
@@ -101,13 +101,11 @@ export class HermesAgent {
       const response = result.response;
       const functionCalls = response.functionCalls();
 
-      // No function calls → Gemini gave us the final text response
       if (!functionCalls || functionCalls.length === 0) {
         finalText = response.text();
         break;
       }
 
-      // Execute each function call sequentially (order matters for context)
       const functionResponses: Part[] = [];
 
       for (const fc of functionCalls) {
@@ -115,6 +113,34 @@ export class HermesAgent {
           .replace(/_/g, " ")
           .replace(/\b\w/g, (c) => c.toUpperCase());
 
+        // -------------------------------------------------------------------
+        // Phase 8: Risk check — pause before executing high-risk tools
+        // -------------------------------------------------------------------
+        if (requiresApproval(fc.name)) {
+          const riskLevel = getRiskLevel(fc.name);
+          const description =
+            TOOL_APPROVAL_DESCRIPTIONS[fc.name] ??
+            `This action (${label}) requires your approval before proceeding.`;
+
+          // Return a pending-approval signal to the route.
+          // The route creates the audit_log row and emits the SSE event.
+          return {
+            finalText: "",
+            tools,
+            pendingApproval: {
+              toolName: fc.name,
+              toolLabel: label,
+              args: (fc.args ?? {}) as Record<string, unknown>,
+              riskLevel,
+              description,
+              userMessage: message,
+            },
+          };
+        }
+
+        // -------------------------------------------------------------------
+        // Low / medium risk — execute immediately
+        // -------------------------------------------------------------------
         await onEvent({ type: "tool_start", name: fc.name, label });
 
         const { result: toolResult, record } = await executeTool(
@@ -136,11 +162,9 @@ export class HermesAgent {
         });
       }
 
-      // Send all tool results back to Gemini for the next round
       currentParts = functionResponses;
     }
 
-    // Fallback if the loop exhausted without producing text
     if (!finalText) {
       finalText =
         "I have completed the requested actions. Let me know if you need anything else.";

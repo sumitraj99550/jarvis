@@ -75,6 +75,17 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
       required: ["query"],
     },
   },
+  {
+    name: "clear_all_tasks",
+    description:
+      "Permanently delete ALL of the user\'s tasks. " +
+      "This action is irreversible and cannot be undone. " +
+      "Use only when the user explicitly asks to clear, wipe, or delete all tasks.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {},
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -167,6 +178,20 @@ export async function executeTool(
         record: {
           label: "Search web",
           summary: `Web search for "${query}" — Phase 10 stub`,
+        },
+      };
+    }
+
+    // -----------------------------------------------------------------------
+    case "clear_all_tasks": {
+      const { count } = await db.task.deleteMany({
+        where: { userId: ctx.userId },
+      });
+      return {
+        result: { deleted: count },
+        record: {
+          label: "Clear all tasks",
+          summary: `Permanently deleted ${count} task${count !== 1 ? "s" : ""}`,
         },
       };
     }
