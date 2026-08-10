@@ -78,9 +78,15 @@ const STAT_CARDS = [
 const SYSTEM_STATUS = [
   { label: "Database", status: "operational", icon: Database },
   { label: "Authentication", status: "operational", icon: ShieldCheck },
-  { label: "AI Engine", status: "pending", icon: Cpu },
-  { label: "Agent Orchestrator", status: "pending", icon: Activity },
-  { label: "Background Jobs", status: "pending", icon: BarChart3 },
+  { label: "AI Engine", status: "operational", icon: Cpu },
+  { label: "Agent Orchestrator", status: "operational", icon: Activity },
+  { label: "Background Jobs", status: "operational", icon: BarChart3 },
+  {
+    label: "Worker Process",
+    status: "operational",
+    icon: Zap,
+    href: "/api/queue/status",
+  },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -91,9 +97,12 @@ const ROADMAP = [
   { phase: 2, label: "Database & ORM", done: true },
   { phase: 3, label: "Authentication & RBAC", done: true },
   { phase: 4, label: "App Shell & Design System", done: true },
-  { phase: 5, label: "AI Command Center (text)", done: false },
-  { phase: 6, label: "Streaming Responses", done: false },
-  { phase: 7, label: "Hermes Orchestration Layer", done: false },
+  { phase: 5, label: "AI Command Center (text)", done: true },
+  { phase: 6, label: "Streaming Responses", done: true },
+  { phase: 7, label: "Hermes Orchestration Layer", done: true },
+  { phase: 8, label: "Human-in-the-Loop Approvals", done: true },
+  { phase: 9, label: "Background Jobs Infrastructure", done: true },
+  { phase: 10, label: "Buffer MCP Integration (Social)", done: true },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -121,7 +130,7 @@ export default async function DashboardPage() {
               {greeting}, <span className="text-neon">{displayName}</span>
             </h2>
             <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
-              Phase 4 of 20 complete — shell &amp; design system online.
+              Phase 10 of 20 complete — social posting (stub) online.
             </p>
           </div>
           <Badge variant="default" className="self-start sm:self-auto">
@@ -171,21 +180,36 @@ export default async function DashboardPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {SYSTEM_STATUS.map(({ label, status, icon: Icon }) => (
-                <div key={label} className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <Icon className="size-4 text-[var(--muted-foreground)]" />
-                    <span className="text-sm text-[var(--foreground)]">
-                      {label}
-                    </span>
-                  </div>
-                  <Badge
-                    variant={status === "operational" ? "success" : "muted"}
+              {SYSTEM_STATUS.map(({ label, status, icon: Icon, ...rest }) => {
+                const href = "href" in rest ? rest.href : undefined;
+                return (
+                  <div
+                    key={label}
+                    className="flex items-center justify-between"
                   >
-                    {status === "operational" ? "Operational" : "Pending"}
-                  </Badge>
-                </div>
-              ))}
+                    <div className="flex items-center gap-2.5">
+                      <Icon className="size-4 text-[var(--muted-foreground)]" />
+                      {href ? (
+                        <a
+                          href={href}
+                          className="text-sm text-[var(--foreground)] underline-offset-2 hover:underline"
+                        >
+                          {label}
+                        </a>
+                      ) : (
+                        <span className="text-sm text-[var(--foreground)]">
+                          {label}
+                        </span>
+                      )}
+                    </div>
+                    <Badge
+                      variant={status === "operational" ? "success" : "muted"}
+                    >
+                      {status === "operational" ? "Operational" : "Pending"}
+                    </Badge>
+                  </div>
+                );
+              })}
             </CardContent>
           </Card>
 

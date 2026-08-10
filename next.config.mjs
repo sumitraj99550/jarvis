@@ -15,6 +15,9 @@ const nextConfig = {
    *                        chunk by Turbopack.
    * - `prisma`           : the Prisma CLI package; never needed at runtime
    *                        but listed here to be safe.
+   * - `bullmq` and `ioredis` : the background job queue client and its
+   *                        Redis driver (Phase 9) open raw TCP sockets via
+   *                        Node.js net APIs, same constraint as `pg` above.
    *
    * With these listed, Next.js loads them via Node.js `require()` at runtime
    * rather than bundling them, which is exactly how they're designed to work.
@@ -25,6 +28,8 @@ const nextConfig = {
     "pg",
     "prisma",
     "@google/generative-ai",
+    "bullmq",
+    "ioredis",
   ],
 };
 

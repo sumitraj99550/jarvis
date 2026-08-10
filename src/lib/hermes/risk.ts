@@ -33,8 +33,11 @@ export const TOOL_RISK: Record<string, RiskLevel> = {
   // Destructive / irreversible — must be approved by the user
   clear_all_tasks: "high",
 
-  // Placeholders for Phase 10–12 (social posting, ad spend, etc.)
+  // Publishes externally-visible content — critical, always requires approval.
+  // Phase 10: runs against a stub Buffer client (no real network post yet).
   post_social_media: "critical",
+
+  // Placeholders for Phase 11–13 (ad spend, email, etc.)
   increase_ad_budget: "critical",
   send_email_blast: "critical",
 };

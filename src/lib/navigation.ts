@@ -82,7 +82,6 @@ export const navigation: NavGroup[] = [
         href: "/dashboard/social",
         icon: Share2,
         phase: 10,
-        disabled: true,
       },
       {
         label: "Meta Ads",

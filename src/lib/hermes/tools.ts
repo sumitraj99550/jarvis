@@ -1,5 +1,6 @@
 import { SchemaType, type FunctionDeclaration } from "@google/generative-ai";
 import { db } from "@/lib/db";
+import { getBufferService } from "@/lib/buffer";
 import type { ToolContext, ToolRecord } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -86,6 +87,36 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
       properties: {},
     },
   },
+  {
+    name: "post_social_media",
+    description:
+      "Schedule or immediately publish a post to a connected social media " +
+      "account (Twitter, LinkedIn, Instagram, or Facebook). " +
+      "Use when the user asks to post, share, or schedule content to social media. " +
+      "Currently runs against a stub provider (Buffer's free tier has no API access) " +
+      "— connected profiles are simulated, no real network post is made.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        platform: {
+          type: SchemaType.STRING,
+          format: "enum" as const,
+          enum: ["TWITTER", "LINKEDIN", "INSTAGRAM", "FACEBOOK"],
+          description: "Which social platform to post to",
+        },
+        content: {
+          type: SchemaType.STRING,
+          description: "The post text/content",
+        },
+        scheduledFor: {
+          type: SchemaType.STRING,
+          description:
+            "ISO 8601 timestamp to schedule the post for. Omit to publish immediately.",
+        },
+      },
+      required: ["platform", "content"],
+    },
+  },
 ];
 
 // ---------------------------------------------------------------------------
@@ -166,18 +197,16 @@ export async function executeTool(
     // -----------------------------------------------------------------------
     case "search_web": {
       const query = String(args.query ?? "");
-      // Real implementation arrives in Phase 10 (MCP integrations).
+      // Real implementation is a future phase — not yet scheduled.
       return {
         result: {
           stub: true,
           query,
-          message:
-            "Web search is not yet connected — arriving in Phase 10 " +
-            "when Buffer/MCP integrations are wired up.",
+          message: "Web search is not yet connected.",
         },
         record: {
           label: "Search web",
-          summary: `Web search for "${query}" — Phase 10 stub`,
+          summary: `Web search for "${query}" — stub`,
         },
       };
     }
@@ -192,6 +221,37 @@ export async function executeTool(
         record: {
           label: "Clear all tasks",
           summary: `Permanently deleted ${count} task${count !== 1 ? "s" : ""}`,
+        },
+      };
+    }
+
+    // -----------------------------------------------------------------------
+    case "post_social_media": {
+      const platform = String(
+        args.platform ?? "",
+      ) as import("@/lib/buffer/types").SocialPlatform;
+      const content = String(args.content ?? "");
+      const scheduledFor =
+        typeof args.scheduledFor === "string" && args.scheduledFor
+          ? args.scheduledFor
+          : undefined;
+
+      const post = await getBufferService().createPost(ctx.userId, {
+        platform,
+        content,
+        scheduledFor,
+      });
+
+      const when =
+        post.status === "PUBLISHED"
+          ? "published immediately"
+          : `scheduled for ${new Date(post.scheduledFor!).toLocaleString()}`;
+
+      return {
+        result: { id: post.id, platform, status: post.status },
+        record: {
+          label: "Post to social media",
+          summary: `${platform}: ${when} (mock provider — no real post made)`,
         },
       };
     }

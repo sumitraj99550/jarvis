@@ -52,6 +52,9 @@ model User {
   conversations Conversation[]
   tasks         Task[]
   auditLogs     AuditLog[]
+  socialPosts   SocialPost[]
+  socialAccounts SocialAccount[]
+  socialSettings SocialSettings?
 
   @@map("users")
 }
@@ -188,6 +191,98 @@ model Campaign {
   updatedAt   DateTime       @updatedAt
 
   @@map("campaigns")
+}
+
+// ---------------------------------------------------------------------------
+// Social Media / Buffer MCP (Phase 10)
+// ---------------------------------------------------------------------------
+// STUB PHASE: Buffer's API requires a paid Buffer plan (no free tier API
+// access), so this phase ships against a mock service layer
+// (src/lib/buffer/) instead of the real Buffer API. Every feature —
+// connected accounts, drafts, scheduling, publishing, analytics, settings —
+// works end-to-end locally against mock data. The service layer sits
+// between the UI and the provider:
+//
+//   UI → BufferService interface → MockBufferService (now)
+//                                 → RealBufferService (later, drop-in)
+//
+// The data model and API surface are built to the real Buffer integration
+// shape, so swapping the mock service for the real one later requires no
+// schema or route changes — only src/lib/buffer/real-service.ts gets filled
+// in and src/lib/buffer/index.ts's selector switches over.
+
+enum SocialPlatform {
+  TWITTER
+  LINKEDIN
+  INSTAGRAM
+  FACEBOOK
+}
+
+enum SocialPostStatus {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  FAILED
+}
+
+/** A connected (or disconnected) social account — mirrors Buffer "profiles". */
+model SocialAccount {
+  id        String         @id @default(cuid())
+  platform  SocialPlatform
+  handle    String
+  connected Boolean        @default(true)
+  // Mock follower count — populated with a deterministic pseudo-random
+  // number on creation, purely for the Analytics tab to have something
+  // to show. Replaced by a real follower count once the real API is wired up.
+  followers Int            @default(0)
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@unique([userId, platform])
+  @@map("social_accounts")
+}
+
+model SocialPost {
+  id           String            @id @default(cuid())
+  platform     SocialPlatform
+  content      String            @db.Text
+  status       SocialPostStatus  @default(DRAFT)
+  // Buffer's "update id" once posted through the service layer —
+  // lets us look the post back up against the provider.
+  providerId   String?
+  scheduledFor DateTime?
+  publishedAt  DateTime?
+  // Mock engagement numbers, populated once a post moves to PUBLISHED.
+  // Real API integration replaces these with actual Buffer analytics.
+  impressions  Int               @default(0)
+  likes        Int               @default(0)
+  clicks       Int               @default(0)
+  userId       String?
+  user         User?             @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([status, scheduledFor])
+  @@index([userId, status])
+  @@map("social_posts")
+}
+
+/** Per-user social module preferences. */
+model SocialSettings {
+  id            String         @id @default(cuid())
+  userId        String         @unique
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultPlatform SocialPlatform @default(TWITTER)
+  // If true, posts scheduled through the Hermes agent skip the human
+  // approval gate (still "critical" risk by default — this is an opt-in
+  // per-user override applied in the tool executor).
+  autoPublish   Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@map("social_settings")
 }
 
 // ---------------------------------------------------------------------------
