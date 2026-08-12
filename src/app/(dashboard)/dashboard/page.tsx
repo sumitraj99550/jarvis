@@ -10,8 +10,13 @@ import {
   Users,
   BarChart3,
   Zap,
+  CreditCard,
+  Headphones,
+  FileText,
 } from "lucide-react";
 import { getCurrentDbUser } from "@/lib/auth";
+import { db } from "@/lib/db";
+import { getJobQueue } from "@/lib/queue";
 import {
   Card,
   CardContent,
@@ -39,55 +44,119 @@ function getGreeting(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Static stat cards (will be wired to real data from Phase 5+)
+// Stat cards — real data for shipped phases, honest "not built yet" for
+// features that don't exist. Never show a number without a real query
+// backing it.
 // ---------------------------------------------------------------------------
-const STAT_CARDS = [
-  {
-    label: "AI Commands",
-    value: "—",
-    sub: "Live in Phase 5",
-    icon: Terminal,
-    phase: 5,
-  },
-  {
-    label: "Voice Sessions",
-    value: "—",
-    sub: "Live in Phase 16",
-    icon: Mic2,
-    phase: 16,
-  },
-  {
-    label: "Active Users",
-    value: "—",
-    sub: "Live in Phase 3 sync",
-    icon: Users,
-    phase: 3,
-  },
-  {
-    label: "Automations Run",
-    value: "—",
-    sub: "Live in Phase 9",
-    icon: Zap,
-    phase: 9,
-  },
-] as const;
+async function getStatCards() {
+  // Real, DB-backed (Phase 3 users, Phase 5 conversations)
+  const [conversationCount, userCount] = await Promise.all([
+    db.conversation.count(),
+    db.user.count(),
+  ]);
+
+  // Real, queue-backed (Phase 9) — degrade gracefully if Redis isn't
+  // reachable rather than pretending the number is 0.
+  let completedJobs: number | null = null;
+  try {
+    const counts = await getJobQueue().getJobCounts("completed");
+    completedJobs = counts.completed ?? 0;
+  } catch {
+    completedJobs = null;
+  }
+
+  return [
+    {
+      label: "AI Commands",
+      value: String(conversationCount),
+      sub: "Total conversations logged",
+      icon: Terminal,
+      locked: false,
+    },
+    {
+      label: "Voice Sessions",
+      value: "—",
+      sub: "Not built yet — arrives in Phase 16",
+      icon: Mic2,
+      locked: true,
+    },
+    {
+      label: "Active Users",
+      value: String(userCount),
+      sub: "Total registered users",
+      icon: Users,
+      locked: false,
+    },
+    {
+      label: "Background Jobs",
+      value: completedJobs === null ? "—" : String(completedJobs),
+      sub:
+        completedJobs === null
+          ? "Worker unreachable — is `npm run worker` running?"
+          : "Completed jobs (heartbeat, sync, briefings)",
+      icon: Zap,
+      locked: false,
+    },
+  ] as const;
+}
 
 // ---------------------------------------------------------------------------
 // System status items (real status checks for Phase 1–3 deliverables)
 // ---------------------------------------------------------------------------
-const SYSTEM_STATUS = [
-  { label: "Database", status: "operational", icon: Database },
-  { label: "Authentication", status: "operational", icon: ShieldCheck },
-  { label: "AI Engine", status: "operational", icon: Cpu },
-  { label: "Agent Orchestrator", status: "operational", icon: Activity },
-  { label: "Background Jobs", status: "operational", icon: BarChart3 },
-  {
-    label: "Worker Process",
-    status: "operational",
-    icon: Zap,
-    href: "/api/queue/status",
-  },
-] as const;
+// ---------------------------------------------------------------------------
+// System status — real checks, not hardcoded claims. Each entry actually
+// probes the thing it describes; if a check fails or a dependency isn't
+// configured, it's reported as such rather than defaulting to "operational".
+// ---------------------------------------------------------------------------
+async function getSystemStatus() {
+  const [dbOk, queueOk] = await Promise.allSettled([
+    db.user.count().then(() => true),
+    getJobQueue()
+      .getJobCounts("completed")
+      .then(() => true),
+  ]);
+
+  const dbUp = dbOk.status === "fulfilled";
+  const queueUp = queueOk.status === "fulfilled";
+  const aiConfigured = Boolean(process.env.GOOGLE_AI_API_KEY);
+
+  return [
+    {
+      label: "Database",
+      status: dbUp ? "operational" : "unreachable",
+      icon: Database,
+    },
+    {
+      label: "Authentication",
+      // If this page rendered at all, getCurrentDbUser() + Clerk both
+      // succeeded — that's the actual proof, not an assumption.
+      status: "operational",
+      icon: ShieldCheck,
+    },
+    {
+      label: "AI Engine",
+      status: aiConfigured ? "operational" : "not configured",
+      icon: Cpu,
+    },
+    {
+      label: "Agent Orchestrator",
+      // Hermes depends on the same Gemini key as the AI Engine.
+      status: aiConfigured ? "operational" : "not configured",
+      icon: Activity,
+    },
+    {
+      label: "Background Jobs",
+      status: queueUp ? "operational" : "unreachable",
+      icon: BarChart3,
+    },
+    {
+      label: "Worker Process",
+      status: queueUp ? "operational" : "unreachable",
+      icon: Zap,
+      href: "/api/queue/status",
+    },
+  ] as const;
+}
 
 // ---------------------------------------------------------------------------
 // Roadmap items — shows progress through the 20 phases
@@ -114,6 +183,8 @@ export default async function DashboardPage() {
 
   const greeting = getGreeting();
   const displayName = user.name ?? user.email.split("@")[0];
+  const statCards = await getStatCards();
+  const systemStatus = await getSystemStatus();
 
   return (
     <div className="h-full overflow-y-auto">
@@ -142,10 +213,13 @@ export default async function DashboardPage() {
         {/* Stat cards                                                         */}
         {/* ------------------------------------------------------------------ */}
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          {STAT_CARDS.map((card) => {
+          {statCards.map((card) => {
             const Icon = card.icon;
             return (
-              <Card key={card.label}>
+              <Card
+                key={card.label}
+                className={card.locked ? "opacity-60" : undefined}
+              >
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
                     <CardDescription>{card.label}</CardDescription>
@@ -180,7 +254,7 @@ export default async function DashboardPage() {
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-3">
-              {SYSTEM_STATUS.map(({ label, status, icon: Icon, ...rest }) => {
+              {systemStatus.map(({ label, status, icon: Icon, ...rest }) => {
                 const href = "href" in rest ? rest.href : undefined;
                 return (
                   <div
@@ -205,7 +279,11 @@ export default async function DashboardPage() {
                     <Badge
                       variant={status === "operational" ? "success" : "muted"}
                     >
-                      {status === "operational" ? "Operational" : "Pending"}
+                      {status === "operational"
+                        ? "Operational"
+                        : status === "unreachable"
+                          ? "Unreachable"
+                          : "Not configured"}
                     </Badge>
                   </div>
                 );
@@ -253,7 +331,7 @@ export default async function DashboardPage() {
               <div className="flex items-center gap-3 pt-1">
                 <Skeleton className="size-6 rounded-full" />
                 <span className="text-xs text-[var(--muted-foreground)]">
-                  Phases 8–20 unlocking progressively…
+                  Phases 11–20 unlocking progressively…
                 </span>
               </div>
             </CardContent>
@@ -270,22 +348,28 @@ export default async function DashboardPage() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {[
               {
-                title: "AI Command Center",
-                desc: "Type natural-language commands. JARVIS executes them.",
-                icon: Terminal,
-                phase: 5,
+                title: "Revenue (RevenueCat)",
+                desc: "Subscription and revenue tracking MCP integration.",
+                icon: CreditCard,
+                phase: 11,
               },
               {
-                title: "Streaming Responses",
-                desc: "Real-time token streaming for all AI responses.",
+                title: "Meta Ads",
+                desc: "Campaign performance and ad spend MCP integration.",
                 icon: Activity,
-                phase: 6,
+                phase: 12,
               },
               {
-                title: "Hermes Agent",
-                desc: "Multi-tool orchestration layer with memory and planning.",
-                icon: Cpu,
-                phase: 7,
+                title: "Support Center",
+                desc: "AI-assisted customer support ticket agent.",
+                icon: Headphones,
+                phase: 13,
+              },
+              {
+                title: "Daily Briefings",
+                desc: "Real AI-generated daily summaries, replacing the Phase 9 stub.",
+                icon: FileText,
+                phase: 14,
               },
             ].map((item) => {
               const Icon = item.icon;

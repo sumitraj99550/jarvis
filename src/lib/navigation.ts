@@ -21,7 +21,11 @@ export type NavItem = {
   label: string;
   href: string;
   icon: LucideIcon;
-  /** Phase this feature ships in — displayed as a muted badge on disabled items */
+  /**
+   * Phase this feature ships in — displayed as a muted badge on disabled
+   * items. Omit if the feature isn't concretely scheduled to a specific
+   * phase yet (don't guess a number just to fill the badge).
+   */
   phase?: number;
   /** Disabled items are rendered but not navigable (future phases) */
   disabled?: boolean;
@@ -69,7 +73,6 @@ export const navigation: NavGroup[] = [
         label: "Analytics",
         href: "/dashboard/analytics",
         icon: BarChart3,
-        phase: 4,
         disabled: true,
       },
     ],
@@ -146,7 +149,6 @@ export const navigation: NavGroup[] = [
         label: "Automations",
         href: "/dashboard/automations",
         icon: Zap,
-        phase: 9,
         disabled: true,
       },
     ],
@@ -159,7 +161,6 @@ export const navigation: NavGroup[] = [
         href: "/dashboard/audit",
         icon: ShieldCheck,
         phase: 8,
-        disabled: true,
       },
       {
         label: "Settings",
