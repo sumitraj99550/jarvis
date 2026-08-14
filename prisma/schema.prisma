@@ -55,6 +55,12 @@ model User {
   socialPosts   SocialPost[]
   socialAccounts SocialAccount[]
   socialSettings SocialSettings?
+  revenueSubscribers RevenueSubscriber[]
+  revenueSettings    RevenueSettings?
+  campaigns          Campaign[]
+  adAudiences        AdAudience[]
+  metaAdsSettings    MetaAdsSettings?
+  assignedTickets    Ticket[]
 
   @@map("users")
 }
@@ -157,16 +163,41 @@ enum TicketPriority {
   URGENT
 }
 
-model Ticket {
-  id         String         @id @default(cuid())
-  customer   String
-  status     TicketStatus   @default(OPEN)
-  priority   TicketPriority @default(MEDIUM)
-  resolution String?        @db.Text
-  createdAt  DateTime       @default(now())
-  updatedAt  DateTime       @updatedAt
+enum TicketMessageAuthor {
+  CUSTOMER
+  AGENT
+  AI_DRAFT
+}
 
+model Ticket {
+  id            String         @id @default(cuid())
+  subject       String
+  customer      String
+  customerEmail String
+  status        TicketStatus   @default(OPEN)
+  priority      TicketPriority @default(MEDIUM)
+  resolution    String?        @db.Text
+  assignedToId  String?
+  assignedTo    User?          @relation(fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages      TicketMessage[]
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+
+  @@index([status, priority])
   @@map("tickets")
+}
+
+/** A single message in a ticket's thread — from the customer, an agent, or an AI-drafted reply. */
+model TicketMessage {
+  id        String              @id @default(cuid())
+  ticketId  String
+  ticket    Ticket              @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  author    TicketMessageAuthor
+  content   String              @db.Text
+  createdAt DateTime            @default(now())
+
+  @@index([ticketId, createdAt])
+  @@map("ticket_messages")
 }
 
 // ---------------------------------------------------------------------------
@@ -180,17 +211,201 @@ enum CampaignStatus {
   COMPLETED
 }
 
-model Campaign {
-  id          String         @id @default(cuid())
-  name        String
-  status      CampaignStatus @default(DRAFT)
-  spend       Decimal        @default(0) @db.Decimal(12, 2)
-  impressions Int            @default(0)
-  clicks      Int            @default(0)
-  createdAt   DateTime       @default(now())
-  updatedAt   DateTime       @updatedAt
+enum CampaignObjective {
+  AWARENESS
+  TRAFFIC
+  ENGAGEMENT
+  CONVERSIONS
+  APP_INSTALLS
+}
 
+enum AdPlatform {
+  FACEBOOK
+  INSTAGRAM
+  AUDIENCE_NETWORK
+  MESSENGER
+}
+
+model Campaign {
+  id             String            @id @default(cuid())
+  name           String
+  status         CampaignStatus    @default(DRAFT)
+  objective      CampaignObjective @default(TRAFFIC)
+  platform       AdPlatform        @default(FACEBOOK)
+  /** Total lifetime budget for the campaign. */
+  budgetCents    Int               @default(0)
+  dailyBudgetCents Int             @default(0)
+  spend          Decimal           @default(0) @db.Decimal(12, 2)
+  impressions    Int               @default(0)
+  clicks         Int               @default(0)
+  /** Meta Marketing API campaign id once created through the (mock) client. */
+  providerId     String?
+  ownerId        String?
+  owner          User?             @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  dailyStats     CampaignDailyStat[]
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([ownerId, status])
   @@map("campaigns")
+}
+
+/** Daily performance rollup — powers the Performance tab's trend chart. */
+model CampaignDailyStat {
+  id          String   @id @default(cuid())
+  campaignId  String
+  campaign    Campaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  date        DateTime
+  impressions Int      @default(0)
+  clicks      Int      @default(0)
+  spendCents  Int      @default(0)
+
+  @@unique([campaignId, date])
+  @@map("campaign_daily_stats")
+}
+
+/** Mock Custom Audience — mirrors Meta's Custom Audiences concept. */
+model AdAudience {
+  id            String   @id @default(cuid())
+  name          String
+  description   String?
+  sizeEstimate  Int      @default(0)
+  providerId    String?
+  ownerId       String
+  owner         User     @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt     DateTime @default(now())
+
+  @@index([ownerId])
+  @@map("ad_audiences")
+}
+
+model MetaAdsSettings {
+  id             String   @id @default(cuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayCurrency String  @default("USD")
+  /** If true, campaigns auto-pause when spend reaches their budget. */
+  autoPauseOnBudget Boolean @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@map("meta_ads_settings")
+}
+
+// ---------------------------------------------------------------------------
+// Revenue / RevenueCat MCP (Phase 11)
+// ---------------------------------------------------------------------------
+// STUB PHASE: same architecture as Social/Buffer (Phase 10) — RevenueCat
+// requires the user to configure their own app + products before its API
+// returns anything meaningful, so this ships against a mock service layer
+// (src/lib/revenuecat/) instead. Every feature (subscriber list, product
+// catalog, transaction history, granting promotional entitlements, revenue
+// overview) works end-to-end locally against seeded mock data. Only the
+// final network hop to api.revenuecat.com is mocked.
+
+enum RevenueSubscriptionStatus {
+  ACTIVE
+  IN_TRIAL
+  CANCELLED
+  EXPIRED
+  BILLING_ISSUE
+}
+
+enum RevenueStore {
+  APP_STORE
+  PLAY_STORE
+  STRIPE
+  PROMOTIONAL
+}
+
+enum RevenueTransactionType {
+  PURCHASE
+  RENEWAL
+  REFUND
+  CANCELLATION
+  PROMOTIONAL_GRANT
+}
+
+enum RevenuePeriod {
+  WEEKLY
+  MONTHLY
+  YEARLY
+  LIFETIME
+}
+
+model RevenueProduct {
+  id          String          @id @default(cuid())
+  /** Store product identifier, e.g. "jarvis_pro_monthly" */
+  productId   String          @unique
+  name        String
+  priceCents  Int
+  currency    String          @default("USD")
+  period      RevenuePeriod
+  active      Boolean         @default(true)
+  createdAt   DateTime        @default(now())
+  subscriptions RevenueSubscription[]
+  transactions  RevenueTransaction[]
+
+  @@map("revenue_products")
+}
+
+model RevenueSubscriber {
+  id           String                 @id @default(cuid())
+  /** RevenueCat "app_user_id" — mock-generated, not a real Clerk/app id. */
+  appUserId    String                 @unique
+  email        String?
+  ownerId      String
+  owner        User                   @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt    DateTime               @default(now())
+  subscriptions RevenueSubscription[]
+  transactions  RevenueTransaction[]
+
+  @@index([ownerId])
+  @@map("revenue_subscribers")
+}
+
+model RevenueSubscription {
+  id               String                    @id @default(cuid())
+  subscriberId     String
+  subscriber       RevenueSubscriber         @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  productId        String
+  product          RevenueProduct            @relation(fields: [productId], references: [id], onDelete: Cascade)
+  status           RevenueSubscriptionStatus @default(ACTIVE)
+  store            RevenueStore              @default(APP_STORE)
+  startedAt        DateTime                  @default(now())
+  currentPeriodEnd DateTime
+  cancelledAt      DateTime?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+
+  @@index([subscriberId, status])
+  @@map("revenue_subscriptions")
+}
+
+model RevenueTransaction {
+  id           String                 @id @default(cuid())
+  subscriberId String
+  subscriber   RevenueSubscriber      @relation(fields: [subscriberId], references: [id], onDelete: Cascade)
+  productId    String
+  product      RevenueProduct         @relation(fields: [productId], references: [id], onDelete: Cascade)
+  type         RevenueTransactionType
+  amountCents  Int
+  currency     String                 @default("USD")
+  occurredAt   DateTime               @default(now())
+
+  @@index([subscriberId, occurredAt])
+  @@map("revenue_transactions")
+}
+
+model RevenueSettings {
+  id              String   @id @default(cuid())
+  userId          String   @unique
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  displayCurrency String   @default("USD")
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@map("revenue_settings")
 }
 
 // ---------------------------------------------------------------------------

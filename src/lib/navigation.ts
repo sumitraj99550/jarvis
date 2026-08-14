@@ -91,14 +91,12 @@ export const navigation: NavGroup[] = [
         href: "/dashboard/ads",
         icon: Megaphone,
         phase: 12,
-        disabled: true,
       },
       {
         label: "Revenue",
         href: "/dashboard/revenue",
         icon: CreditCard,
         phase: 11,
-        disabled: true,
       },
     ],
   },
@@ -110,7 +108,6 @@ export const navigation: NavGroup[] = [
         href: "/dashboard/support",
         icon: Headphones,
         phase: 13,
-        disabled: true,
       },
       {
         label: "Daily Briefings",
