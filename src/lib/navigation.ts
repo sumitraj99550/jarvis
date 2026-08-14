@@ -114,7 +114,6 @@ export const navigation: NavGroup[] = [
         href: "/dashboard/briefings",
         icon: FileText,
         phase: 14,
-        disabled: true,
       },
       {
         label: "Knowledge Base",

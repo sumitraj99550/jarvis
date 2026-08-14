@@ -139,7 +139,11 @@ model Task {
 
 model Briefing {
   id        String   @id @default(cuid())
+  /** Calendar date (midnight UTC) this briefing covers. */
+  date      DateTime @default(now())
   summary   String   @db.Text
+  /** Structured metrics the summary was generated from — powers the UI's stat cards. */
+  stats     Json
   createdAt DateTime @default(now())
 
   @@map("briefings")

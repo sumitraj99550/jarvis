@@ -172,6 +172,10 @@ const ROADMAP = [
   { phase: 8, label: "Human-in-the-Loop Approvals", done: true },
   { phase: 9, label: "Background Jobs Infrastructure", done: true },
   { phase: 10, label: "Buffer MCP Integration (Social)", done: true },
+  { phase: 11, label: "RevenueCat MCP Integration", done: true },
+  { phase: 12, label: "Meta Ads MCP Integration", done: true },
+  { phase: 13, label: "Customer Support Agent", done: true },
+  { phase: 14, label: "Daily Briefing Engine", done: true },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -201,7 +205,7 @@ export default async function DashboardPage() {
               {greeting}, <span className="text-neon">{displayName}</span>
             </h2>
             <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
-              Phase 10 of 20 complete — social posting (stub) online.
+              Phase 14 of 20 complete — daily briefings online.
             </p>
           </div>
           <Badge variant="default" className="self-start sm:self-auto">
@@ -331,7 +335,7 @@ export default async function DashboardPage() {
               <div className="flex items-center gap-3 pt-1">
                 <Skeleton className="size-6 rounded-full" />
                 <span className="text-xs text-[var(--muted-foreground)]">
-                  Phases 11–20 unlocking progressively…
+                  Phases 15–20 unlocking progressively…
                 </span>
               </div>
             </CardContent>
@@ -348,28 +352,28 @@ export default async function DashboardPage() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {[
               {
-                title: "Revenue (RevenueCat)",
-                desc: "Subscription and revenue tracking MCP integration.",
+                title: "Voice Layer (TTS)",
+                desc: "Text-to-speech responses from JARVIS.",
                 icon: CreditCard,
-                phase: 11,
+                phase: 15,
               },
               {
-                title: "Meta Ads",
-                desc: "Campaign performance and ad spend MCP integration.",
+                title: "Voice Layer (STT + Wake Word)",
+                desc: "Speech-to-text input and a wake word listener.",
                 icon: Activity,
-                phase: 12,
+                phase: 16,
               },
               {
-                title: "Support Center",
-                desc: "AI-assisted customer support ticket agent.",
+                title: "Long-Term Memory & Knowledge Base",
+                desc: "Persistent memory and a searchable knowledge base.",
                 icon: Headphones,
-                phase: 13,
+                phase: 17,
               },
               {
-                title: "Daily Briefings",
-                desc: "Real AI-generated daily summaries, replacing the Phase 9 stub.",
+                title: "Notifications, Calendar, Tasks",
+                desc: "Unified task management, calendar, and notifications.",
                 icon: FileText,
-                phase: 14,
+                phase: 18,
               },
             ].map((item) => {
               const Icon = item.icon;
