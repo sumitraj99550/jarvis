@@ -10,7 +10,6 @@ import {
   Users,
   BarChart3,
   Zap,
-  CreditCard,
   Headphones,
   FileText,
 } from "lucide-react";
@@ -75,10 +74,10 @@ async function getStatCards() {
     },
     {
       label: "Voice Sessions",
-      value: "—",
-      sub: "Not built yet — arrives in Phase 16",
+      value: "Live",
+      sub: "Browser-based (STT/TTS) — not counted server-side",
       icon: Mic2,
-      locked: true,
+      locked: false,
     },
     {
       label: "Active Users",
@@ -176,6 +175,8 @@ const ROADMAP = [
   { phase: 12, label: "Meta Ads MCP Integration", done: true },
   { phase: 13, label: "Customer Support Agent", done: true },
   { phase: 14, label: "Daily Briefing Engine", done: true },
+  { phase: 15, label: "Voice Layer (Text-to-Speech)", done: true },
+  { phase: 16, label: "Voice Layer (STT + Wake Word)", done: true },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -205,7 +206,7 @@ export default async function DashboardPage() {
               {greeting}, <span className="text-neon">{displayName}</span>
             </h2>
             <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
-              Phase 14 of 20 complete — daily briefings online.
+              Phase 16 of 20 complete — voice input (STT + wake word) online.
             </p>
           </div>
           <Badge variant="default" className="self-start sm:self-auto">
@@ -351,18 +352,6 @@ export default async function DashboardPage() {
           </h3>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {[
-              {
-                title: "Voice Layer (TTS)",
-                desc: "Text-to-speech responses from JARVIS.",
-                icon: CreditCard,
-                phase: 15,
-              },
-              {
-                title: "Voice Layer (STT + Wake Word)",
-                desc: "Speech-to-text input and a wake word listener.",
-                icon: Activity,
-                phase: 16,
-              },
               {
                 title: "Long-Term Memory & Knowledge Base",
                 desc: "Persistent memory and a searchable knowledge base.",

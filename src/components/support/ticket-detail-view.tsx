@@ -6,6 +6,7 @@ import { ArrowLeft, Loader2, Send, Sparkles, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatDateTime } from "@/lib/format";
 import {
   TICKET_PRIORITIES,
   TICKET_STATUSES,
@@ -187,7 +188,7 @@ export function TicketDetailView({
                 {m.content}
               </p>
               <p className="mt-1.5 text-[10px] text-[var(--muted-foreground)]">
-                {new Date(m.createdAt).toLocaleString()}
+                {formatDateTime(m.createdAt)}
               </p>
             </CardContent>
           </Card>

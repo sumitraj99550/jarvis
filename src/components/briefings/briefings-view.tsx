@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatDateTime } from "@/lib/format";
 import type { BriefingStats } from "@/lib/briefing/generate";
 
 type BriefingDTO = {
@@ -91,7 +92,7 @@ function BriefingCard({ briefing }: { briefing: BriefingDTO }) {
     <Card>
       <CardContent className="space-y-3 pt-6">
         <p className="text-xs text-[var(--muted-foreground)]">
-          {new Date(briefing.createdAt).toLocaleString()}
+          {formatDateTime(briefing.createdAt)}
         </p>
         <p className="text-sm text-[var(--foreground)]">{briefing.summary}</p>
 

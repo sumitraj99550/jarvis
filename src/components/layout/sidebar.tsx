@@ -1,6 +1,6 @@
 "use client";
 
-import React from "react";
+import React, { useSyncExternalStore } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
@@ -137,6 +137,16 @@ function SidebarContent({
   userRole,
 }: SidebarContentProps) {
   const pathname = usePathname();
+  // "Have we hydrated yet" as a useSyncExternalStore read rather than an
+  // effect-driven setState — same pattern as use-sidebar.ts. The
+  // subscription is a no-op (this never changes after mount), so this is
+  // purely a server-vs-client snapshot divergence, not something that
+  // needs cascading re-renders.
+  const mounted = useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -244,15 +254,28 @@ function SidebarContent({
             isCollapsed ? "justify-center" : "gap-3",
           )}
         >
-          {/* Clerk's pre-built user avatar + menu */}
-          <UserButton
-            appearance={{
-              elements: {
-                avatarBox: "size-8",
-                userButtonTrigger: "focus:shadow-none",
-              },
-            }}
-          />
+          {/* Clerk's pre-built user avatar + menu.
+              Clerk's UserButton reconciles its own DOM attributes
+              (data-clerk-component, className, style) after it mounts,
+              which never matches what the server rendered — that's a
+              guaranteed hydration mismatch, not a bug in our markup.
+              Rendering a same-size skeleton until mounted, then swapping
+              to the real UserButton client-side, sidesteps it entirely:
+              server and first client paint agree (skeleton), and the
+              swap to UserButton happens after hydration via a normal
+              effect-driven state update. */}
+          {mounted ? (
+            <UserButton
+              appearance={{
+                elements: {
+                  avatarBox: "size-8",
+                  userButtonTrigger: "focus:shadow-none",
+                },
+              }}
+            />
+          ) : (
+            <div className="size-8 shrink-0 animate-pulse rounded-full bg-[var(--muted)]" />
+          )}
 
           <AnimatePresence initial={false}>
             {!isCollapsed && (

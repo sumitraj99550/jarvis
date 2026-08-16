@@ -18,11 +18,16 @@ import {
   CheckCircle2,
   ToggleLeft,
   ToggleRight,
+  Volume2,
+  VolumeX,
+  Settings2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { formatTime } from "@/lib/format";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useTextToSpeech } from "@/hooks/use-text-to-speech";
 import {
   ApprovalCard,
   ApprovalResultCard,
@@ -92,6 +97,31 @@ export function CommandCenter({
   const bottomRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const activityCounter = useRef(0);
+
+  // Phase 15 — Text-to-speech (real, browser-native Web Speech API)
+  const tts = useTextToSpeech();
+  const [showVoiceSettings, setShowVoiceSettings] = useState(false);
+  const autoSpokenIds = useRef<Set<string>>(new Set());
+
+  // When an assistant message finishes streaming, speak it once if
+  // auto-speak is on. Tracked via a ref set so it never re-speaks a
+  // message that's already been read (e.g. on unrelated re-renders).
+  useEffect(() => {
+    if (!tts.autoSpeak || !tts.isSupported) return;
+    const last = messages[messages.length - 1];
+    if (
+      last &&
+      last.role === "assistant" &&
+      !last.streaming &&
+      !last.approvalResult &&
+      last.content.trim() &&
+      !autoSpokenIds.current.has(last.id)
+    ) {
+      autoSpokenIds.current.add(last.id);
+      tts.speak(last.content, last.id);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [messages, tts.autoSpeak, tts.isSupported]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -428,6 +458,99 @@ export function CommandCenter({
             Phase 8: high-risk actions require approval
           </p>
         )}
+
+        {tts.isSupported && (
+          <div className={cn("relative", !hermesMode && "ml-auto")}>
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                onClick={() => tts.setAutoSpeak(!tts.autoSpeak)}
+                title={
+                  tts.autoSpeak
+                    ? "Auto-speak replies: on"
+                    : "Auto-speak replies: off"
+                }
+                className={cn(
+                  "flex items-center gap-1 rounded-full px-2 py-1 text-xs transition-colors",
+                  tts.autoSpeak
+                    ? "bg-[var(--primary)]/15 text-[var(--primary)]"
+                    : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+                )}
+              >
+                {tts.autoSpeak ? (
+                  <Volume2 className="size-3.5" />
+                ) : (
+                  <VolumeX className="size-3.5" />
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowVoiceSettings((v) => !v)}
+                title="Voice settings"
+                className="rounded-full p-1 text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
+              >
+                <Settings2 className="size-3.5" />
+              </button>
+            </div>
+
+            {showVoiceSettings && (
+              <div className="absolute top-8 right-0 z-10 w-64 space-y-3 rounded-lg border border-[var(--glass-border)] bg-[var(--card)] p-3 shadow-lg">
+                <div>
+                  <label className="mb-1 block text-[10px] text-[var(--muted-foreground)]">
+                    Voice
+                  </label>
+                  <select
+                    value={tts.voiceURI ?? ""}
+                    onChange={(e) => tts.setVoiceURI(e.target.value || null)}
+                    className="w-full rounded-md border border-[var(--border)] bg-[var(--input)] px-2 py-1 text-xs text-[var(--foreground)] outline-none"
+                  >
+                    <option value="">Browser default</option>
+                    {tts.voices.map((v) => (
+                      <option key={v.voiceURI} value={v.voiceURI}>
+                        {v.name} ({v.lang})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 flex justify-between text-[10px] text-[var(--muted-foreground)]">
+                    <span>Speed</span>
+                    <span>{tts.rate.toFixed(1)}×</span>
+                  </label>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={2}
+                    step={0.1}
+                    value={tts.rate}
+                    onChange={(e) => tts.setRate(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 flex justify-between text-[10px] text-[var(--muted-foreground)]">
+                    <span>Pitch</span>
+                    <span>{tts.pitch.toFixed(1)}</span>
+                  </label>
+                  <input
+                    type="range"
+                    min={0}
+                    max={2}
+                    step={0.1}
+                    value={tts.pitch}
+                    onChange={(e) => tts.setPitch(Number(e.target.value))}
+                    className="w-full"
+                  />
+                </div>
+                <p className="text-[9px] text-[var(--muted-foreground)]">
+                  Auto-speak reads new JARVIS replies aloud automatically. Uses
+                  your browser&apos;s built-in voices — nothing is sent to a
+                  server.
+                </p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Messages */}
@@ -451,7 +574,7 @@ export function CommandCenter({
                   executed={msg.approvalResult === "executed"}
                 />
               ) : (
-                <MessageBubble key={msg.id} message={msg} />
+                <MessageBubble key={msg.id} message={msg} tts={tts} />
               ),
             )}
           </AnimatePresence>
@@ -667,8 +790,15 @@ function ActivityRow({ item }: { item: ActivityItem }) {
   );
 }
 
-function MessageBubble({ message }: { message: ChatMessage }) {
+function MessageBubble({
+  message,
+  tts,
+}: {
+  message: ChatMessage;
+  tts: ReturnType<typeof useTextToSpeech>;
+}) {
   const isUser = message.role === "user";
+  const isSpeaking = tts.speakingId === message.id;
   return (
     <motion.div
       initial={{ opacity: 0, y: 8 }}
@@ -691,7 +821,7 @@ function MessageBubble({ message }: { message: ChatMessage }) {
       </div>
       <div
         className={cn(
-          "max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
+          "group max-w-[80%] rounded-2xl px-4 py-2.5 text-sm leading-relaxed",
           isUser
             ? "rounded-tr-sm bg-[var(--primary)]/15 text-[var(--foreground)]"
             : "rounded-tl-sm bg-[var(--secondary)]/50 text-[var(--foreground)]",
@@ -716,14 +846,35 @@ function MessageBubble({ message }: { message: ChatMessage }) {
                 ))}
               </div>
             )}
-            <p
+            <div
               className={cn(
-                "mt-1.5 text-[10px] text-[var(--muted-foreground)]",
-                isUser ? "text-right" : "text-left",
+                "mt-1.5 flex items-center gap-1.5",
+                isUser ? "flex-row-reverse" : "flex-row",
               )}
             >
-              {formatTime(message.createdAt)}
-            </p>
+              <p className="text-[10px] text-[var(--muted-foreground)]">
+                {formatTime(message.createdAt)}
+              </p>
+              {!isUser && tts.isSupported && message.content.trim() && (
+                <button
+                  type="button"
+                  onClick={() => tts.speak(message.content, message.id)}
+                  title={isSpeaking ? "Stop reading aloud" : "Read aloud"}
+                  className={cn(
+                    "rounded-full p-0.5 opacity-0 transition-opacity group-hover:opacity-100",
+                    isSpeaking
+                      ? "text-neon opacity-100"
+                      : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]",
+                  )}
+                >
+                  {isSpeaking ? (
+                    <VolumeX className="size-3" />
+                  ) : (
+                    <Volume2 className="size-3" />
+                  )}
+                </button>
+              )}
+            </div>
           </>
         )}
       </div>
@@ -806,15 +957,4 @@ function ErrorBanner({
       </button>
     </motion.div>
   );
-}
-
-function formatTime(iso: string): string {
-  try {
-    return new Date(iso).toLocaleTimeString(undefined, {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  } catch {
-    return "";
-  }
 }

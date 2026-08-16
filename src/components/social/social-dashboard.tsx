@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatDateTime, formatNumber } from "@/lib/format";
 import {
   PLATFORM_LABELS,
   SOCIAL_PLATFORMS,
@@ -64,7 +65,7 @@ const TAB_LABELS: Record<Tab, string> = {
 };
 
 function fmt(n: number) {
-  return n.toLocaleString();
+  return formatNumber(n);
 }
 
 // ---------------------------------------------------------------------------
@@ -570,10 +571,10 @@ function PostListTab({
 
                 <p className="mt-1.5 text-[11px] text-[var(--muted-foreground)]">
                   {post.status === "SCHEDULED" && post.scheduledFor
-                    ? `Scheduled for ${new Date(post.scheduledFor).toLocaleString()}`
+                    ? `Scheduled for ${formatDateTime(post.scheduledFor)}`
                     : post.status === "PUBLISHED" && post.publishedAt
-                      ? `Published ${new Date(post.publishedAt).toLocaleString()}`
-                      : new Date(post.createdAt).toLocaleString()}
+                      ? `Published ${formatDateTime(post.publishedAt)}`
+                      : formatDateTime(post.createdAt)}
                 </p>
 
                 {post.status === "PUBLISHED" && (

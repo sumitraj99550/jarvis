@@ -67,7 +67,6 @@ export const navigation: NavGroup[] = [
         href: "/dashboard/voice",
         icon: Mic2,
         phase: 16,
-        disabled: true,
       },
       {
         label: "Analytics",

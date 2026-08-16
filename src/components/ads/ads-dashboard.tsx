@@ -17,6 +17,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatDate, formatNumber } from "@/lib/format";
 import {
   OBJECTIVES,
   OBJECTIVE_LABELS,
@@ -61,7 +62,7 @@ function money(cents: number, currency = "USD") {
 }
 
 function fmt(n: number) {
-  return n.toLocaleString();
+  return formatNumber(n);
 }
 
 export function AdsDashboard({
@@ -507,7 +508,7 @@ function CampaignDetail({
         {stats.map((s) => (
           <div
             key={s.date}
-            title={`${new Date(s.date).toLocaleDateString()}: ${s.clicks} clicks, ${money(s.spendCents, currency)}`}
+            title={`${formatDate(s.date)}: ${s.clicks} clicks, ${money(s.spendCents, currency)}`}
             className="flex-1 rounded-t bg-[var(--primary)]/60"
             style={{ height: `${Math.max(4, (s.clicks / maxClicks) * 100)}%` }}
           />

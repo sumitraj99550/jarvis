@@ -14,6 +14,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
+import { formatDate } from "@/lib/format";
 import {
   STORE_LABELS,
   STORES,
@@ -651,8 +652,7 @@ function TransactionsTab({
                   {t.type} · {t.productName}
                 </p>
                 <p className="font-mono text-[10px] text-[var(--muted-foreground)]">
-                  {t.subscriberAppUserId} ·{" "}
-                  {new Date(t.occurredAt).toLocaleDateString()}
+                  {t.subscriberAppUserId} · {formatDate(t.occurredAt)}
                 </p>
               </div>
               <span className="text-[var(--foreground)]">

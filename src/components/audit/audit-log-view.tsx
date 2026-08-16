@@ -5,6 +5,7 @@ import { Loader2, ShieldAlert, RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
+import { formatDateTime } from "@/lib/format";
 
 type AuditLogRow = {
   id: string;
@@ -181,7 +182,7 @@ export function AuditLogView({
                 </div>
                 <p className="text-[11px] text-[var(--muted-foreground)]">
                   {log.user?.name ?? log.user?.email ?? "Unknown user"} ·{" "}
-                  {new Date(log.createdAt).toLocaleString()}
+                  {formatDateTime(log.createdAt)}
                 </p>
                 {log.payload != null && (
                   <pre className="mt-1.5 max-h-32 overflow-auto rounded-md bg-[var(--muted)] p-2 text-[10px] text-[var(--muted-foreground)]">
