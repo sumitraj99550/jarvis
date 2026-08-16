@@ -1,6 +1,6 @@
 # JARVIS — Progress Tracker
 
-**Last updated:** Phase 16 (Voice Layer — STT + Wake Word)
+**Last updated:** Post-Phase-16 hotfix (single-engine voice architecture, barge-in, continuous conversation)
 **Status:** Phase 16 of 20 complete and verified. Phases 1–16 all functionally connected (audited and fixed — see "Phase 1–10 Audit" below).
 
 > **Rule for whoever (human or Claude) touches this project next: update this file in the SAME response that ships code changes — not after, not "later." If you shipped a ZIP, this file must reflect it before you're done.** See "How to update this file" at the bottom.
@@ -98,9 +98,10 @@ Integrated directly into Command Center (no separate page/nav item — it's a fe
 ### Phase 16 — Voice Layer (STT + Wake Word) ✅ — Real (browser-native, no API key)
 Same free, no-API-key foundation as Phase 15 — uses `SpeechRecognition`/`webkitSpeechRecognition`. Honest limitation up front: this only works well in Chrome/Edge; Firefox and Safari have partial-to-no support, and the UI says so plainly rather than pretending otherwise.
 
-- `src/hooks/use-speech-recognition.ts` — wraps the browser API for both one-shot dictation and continuous listening.
-- `src/hooks/use-wake-word.ts` — continuous listening for a configurable phrase (default "hey jarvis"), auto-restarts recognition when the browser silently stops it (Chrome does this every ~60s). Documented honestly as *not* a low-power hardware wake word — it's real speech recognition running in the tab the whole time it's armed, which costs more battery/bandwidth than a smart speaker.
-- New page **`/dashboard/voice`** — a full hands-free conversation loop: arm the wake word or tap the mic → speak → transcript sent to `/api/chat` (same endpoint Command Center uses, so it persists to the same `Conversation` table) → response streams back → Phase 15's TTS speaks it → wake-word listening resumes automatically.
+- `src/hooks/use-speech-recognition.ts` — wraps the browser API for one-shot or continuous listening.
+- `src/hooks/use-wake-word.ts` (`useWakeWordDetector`) — pure phrase-matcher over a transcript you feed it; does **not** own its own recognition instance (see Post-Phase-16 hotfix below for why).
+- New page **`/dashboard/voice`** — a single continuous `SpeechRecognition` instance drives the whole session (armed → capturing → armed → …): arm the wake word or tap the mic → speak → silence-cutoff or manual tap sends the transcript to `/api/chat` (same endpoint Command Center uses, so it persists to the same `Conversation` table) → response streams back → Phase 15's TTS speaks it → listening resumes automatically if "continuous conversation" is on.
+- Real barge-in: a Stop button (or tapping the mic) while JARVIS is thinking/speaking cancels the request and speech immediately.
 - Dashboard's "Voice Sessions" stat card intentionally shows `"Live"` rather than a count — voice turns aren't tracked separately from text turns server-side (they go through the same `/api/chat` endpoint), so a fabricated session count would violate the "no UI number without a real query" rule. If per-channel tracking is wanted later, that needs an explicit `channel` field added to `Conversation`.
 
 ---
@@ -129,6 +130,19 @@ Fixed another hydration mismatch: `formatTime()` in Command Center used `date.to
 Fix: added `src/lib/format.ts` — shared `formatTime`/`formatDate`/`formatDateTime`/`formatNumber` helpers that all pin `"en-US"` explicitly so server and client always agree. Audited the whole codebase for the same pattern (`grep -rn "toLocaleString(\|toLocaleDateString(\|toLocaleTimeString("`) and replaced every unlocaled call in a JSX render path: Command Center, Revenue, Social Media, Meta Ads, Audit Logs, Daily Briefings, and Support Center ticket views. Remaining unlocaled calls are all in server-side text (API error messages, Hermes tool summaries) — not JSX, not a hydration risk, left as-is.
 
 **Rule going forward:** never call `.toLocaleString()`/`.toLocaleDateString()`/`.toLocaleTimeString()`/`.toLocaleString()` (for numbers) directly in a component that can be server-rendered — always go through `src/lib/format.ts`, or explicitly pin a locale inline if a new one-off format is genuinely needed there.
+
+## Post-Phase-16 hotfix
+
+User-reported issues after trying the Voice Assistant for real: mic button unreliable ("works sometimes, doesn't other times"), wake word mis-heard fairly often with no visibility into what was actually heard, no way to interrupt JARVIS mid-reply, and no natural back-and-forth flow (had to re-arm/re-trigger for every turn).
+
+**Root cause of the reliability bug:** the original implementation ran *two separate* `SpeechRecognition` instances — one owned by `useWakeWord` (continuous, listening for the phrase) and one for command capture (`useSpeechRecognition` one-shot). Browsers don't reliably support two concurrent recognition sessions on the same microphone; starting the second one while the first was still tearing down (an async operation) intermittently failed silently. That's exactly "works sometimes, doesn't other times."
+
+**Fix — architecture change:** Voice Assistant now runs exactly **one** continuous `SpeechRecognition` instance for the entire session (armed → capturing → armed → …), never two at once.
+- `useWakeWord` was rewritten as `useWakeWordDetector` — a pure phrase-matcher over whatever transcript text you feed it, with no `SpeechRecognition` of its own.
+- Silence-based cutoff added (1.6s of no new speech while capturing → auto-send), since continuous mode doesn't auto-stop on silence the way one-shot mode does.
+- **Barge-in / interrupt**: a visible "Stop" button (and clicking the mic itself) while JARVIS is thinking/speaking now genuinely cancels the in-flight request (`AbortController`) and stops speech synthesis (`tts.stop()`) immediately, then resumes listening.
+- **Live "Heard: ..." transcript line** now shows continuously while armed/capturing, so mis-hearings (e.g. "bajaj stock" instead of a wake phrase) are visible and debuggable instead of a silent mystery.
+- **Continuous conversation mode** (on by default, toggle in settings): after each reply, listening resumes automatically without needing the wake phrase again — closer to the "real-time conversation" the user asked for. "End session" fully stops everything.
 
 ---
 
