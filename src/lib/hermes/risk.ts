@@ -26,9 +26,12 @@ export const TOOL_RISK: Record<string, RiskLevel> = {
   get_current_time: "low",
   get_system_stats: "low",
   search_web: "low",
+  recall_memory: "low",
+  search_knowledge_base: "low",
 
   // Creates reversible data
   create_task: "medium",
+  remember_fact: "medium",
 
   // Destructive / irreversible — must be approved by the user
   clear_all_tasks: "high",

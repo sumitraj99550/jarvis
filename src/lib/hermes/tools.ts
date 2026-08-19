@@ -1,6 +1,8 @@
 import { SchemaType, type FunctionDeclaration } from "@google/generative-ai";
 import { db } from "@/lib/db";
 import { getBufferService } from "@/lib/buffer";
+import { rememberFact, recallMemories } from "@/lib/knowledge/memory";
+import { searchDocuments } from "@/lib/knowledge/documents";
 import type { ToolContext, ToolRecord } from "./types";
 
 // ---------------------------------------------------------------------------
@@ -115,6 +117,59 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
         },
       },
       required: ["platform", "content"],
+    },
+  },
+  {
+    name: "remember_fact",
+    description:
+      "Save a fact or piece of information to long-term memory, so it can be " +
+      "recalled in future, separate conversations. Use when the user says " +
+      "something like 'remember that...' or shares a durable preference/fact " +
+      "worth keeping (e.g. their timezone, a recurring deadline, a project detail).",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        content: {
+          type: SchemaType.STRING,
+          description:
+            "The fact to remember, written as a standalone statement",
+        },
+      },
+      required: ["content"],
+    },
+  },
+  {
+    name: "recall_memory",
+    description:
+      "Search long-term memory for facts relevant to a query. Use when you " +
+      "need context from a previous conversation that isn't in the current " +
+      "chat history — e.g. the user references something they told you before.",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        query: {
+          type: SchemaType.STRING,
+          description: "What to search memory for",
+        },
+      },
+      required: ["query"],
+    },
+  },
+  {
+    name: "search_knowledge_base",
+    description:
+      "Semantically search the user's Knowledge Base documents for relevant " +
+      "information. Use when the user asks a question that might be answered " +
+      "by a document they've saved (e.g. internal docs, notes, reference material).",
+    parameters: {
+      type: SchemaType.OBJECT,
+      properties: {
+        query: {
+          type: SchemaType.STRING,
+          description: "What to search the knowledge base for",
+        },
+      },
+      required: ["query"],
     },
   },
 ];
@@ -252,6 +307,60 @@ export async function executeTool(
         record: {
           label: "Post to social media",
           summary: `${platform}: ${when} (mock provider — no real post made)`,
+        },
+      };
+    }
+
+    // -----------------------------------------------------------------------
+    case "remember_fact": {
+      const content = String(args.content ?? "").trim();
+      if (!content) throw new Error("'content' is required.");
+
+      const memory = await rememberFact(ctx.userId, content);
+
+      return {
+        result: { id: memory.id },
+        record: {
+          label: "Remember fact",
+          summary: `Saved: "${content.slice(0, 80)}${content.length > 80 ? "…" : ""}"`,
+        },
+      };
+    }
+
+    // -----------------------------------------------------------------------
+    case "recall_memory": {
+      const query = String(args.query ?? "").trim();
+      if (!query) throw new Error("'query' is required.");
+
+      const results = await recallMemories(ctx.userId, query);
+
+      return {
+        result: { matches: results },
+        record: {
+          label: "Recall memory",
+          summary:
+            results.length > 0
+              ? `Found ${results.length} relevant memor${results.length === 1 ? "y" : "ies"}`
+              : "No relevant memories found",
+        },
+      };
+    }
+
+    // -----------------------------------------------------------------------
+    case "search_knowledge_base": {
+      const query = String(args.query ?? "").trim();
+      if (!query) throw new Error("'query' is required.");
+
+      const results = await searchDocuments(ctx.userId, query);
+
+      return {
+        result: { matches: results },
+        record: {
+          label: "Search knowledge base",
+          summary:
+            results.length > 0
+              ? `Found ${results.length} relevant document${results.length === 1 ? "" : "s"}`
+              : "No relevant documents found",
         },
       };
     }

@@ -14,7 +14,11 @@
 
 generator client {
   provider = "prisma-client-js"
-  // driverAdapters no longer requires a previewFeature flag in Prisma 7.8+
+  // driverAdapters no longer requires a previewFeature flag in Prisma 7.8+.
+  // postgresqlExtensions (Phase 17) is a *different*, still-active preview
+  // feature — required to declare `extensions = [vector]` below so
+  // `prisma migrate dev` runs `CREATE EXTENSION IF NOT EXISTS vector`.
+  previewFeatures = ["postgresqlExtensions"]
 }
 
 datasource db {
@@ -22,6 +26,11 @@ datasource db {
   // NOTE: `url` is intentionally absent — Prisma 7 reads it from
   // `prisma.config.ts` via `datasource.url`. Adding it here would cause
   // "The datasource property `url` is no longer supported" error.
+  //
+  // Phase 17: requires the `pgvector/pgvector:pg16` Docker image (NOT
+  // plain `postgres:16-alpine`) — see docker-compose.yml. Standard
+  // Postgres doesn't ship the vector extension.
+  extensions = [vector]
 }
 
 // ---------------------------------------------------------------------------
@@ -61,6 +70,8 @@ model User {
   adAudiences        AdAudience[]
   metaAdsSettings    MetaAdsSettings?
   assignedTickets    Ticket[]
+  knowledgeDocuments KnowledgeDocument[]
+  agentMemories      AgentMemory[]
 
   @@map("users")
 }
@@ -410,6 +421,51 @@ model RevenueSettings {
   updatedAt       DateTime @updatedAt
 
   @@map("revenue_settings")
+}
+
+// ---------------------------------------------------------------------------
+// Long-Term Memory & Knowledge Base (Phase 17)
+// ---------------------------------------------------------------------------
+// REAL, no mock layer — semantic search runs on Gemini's free embedding
+// endpoint (text-embedding-004, 768 dimensions) plus pgvector for cosine
+// similarity. Same GOOGLE_AI_API_KEY the rest of the app already uses.
+//
+// `embedding` is `Unsupported("vector(768)")` because Prisma Client has no
+// native vector type — this means Prisma Client's generated create/update
+// methods can't set it directly. Writes go through `$executeRaw` and
+// similarity search through `$queryRaw` — see src/lib/knowledge/.
+
+model KnowledgeDocument {
+  id        String                    @id @default(cuid())
+  title     String
+  content   String                    @db.Text
+  /** Populated asynchronously right after create — null until embedded. */
+  embedding Unsupported("vector(768)")?
+  ownerId   String
+  owner     User                      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt DateTime                  @default(now())
+  updatedAt DateTime                  @updatedAt
+
+  @@index([ownerId])
+  @@map("knowledge_documents")
+}
+
+/**
+ * Long-term agent memory — facts JARVIS is explicitly asked to remember
+ * (via the `remember_fact` Hermes tool) or that get saved from a
+ * conversation, retrievable by *meaning* (not just keyword) in later
+ * sessions via the `recall_memory` tool.
+ */
+model AgentMemory {
+  id        String                    @id @default(cuid())
+  content   String                    @db.Text
+  embedding Unsupported("vector(768)")?
+  ownerId   String
+  owner     User                      @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  createdAt DateTime                  @default(now())
+
+  @@index([ownerId])
+  @@map("agent_memories")
 }
 
 // ---------------------------------------------------------------------------

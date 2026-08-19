@@ -1,7 +1,7 @@
 # JARVIS — Progress Tracker
 
-**Last updated:** Post-Phase-16 hotfix (single-engine voice architecture, barge-in, continuous conversation)
-**Status:** Phase 16 of 20 complete and verified. Phases 1–16 all functionally connected (audited and fixed — see "Phase 1–10 Audit" below).
+**Last updated:** Phase 17 (Long-Term Memory & Knowledge Base)
+**Status:** Phase 17 of 20 complete and verified. Phases 1–17 all functionally connected (audited and fixed — see "Phase 1–10 Audit" below).
 
 > **Rule for whoever (human or Claude) touches this project next: update this file in the SAME response that ships code changes — not after, not "later." If you shipped a ZIP, this file must reflect it before you're done.** See "How to update this file" at the bottom.
 
@@ -27,7 +27,7 @@
 | 14 | Daily Briefing Engine | ✅ Done | Real (Gemini + real stats) | Daily Briefings |
 | 15 | Voice Layer (Text-to-Speech) | ✅ Done | Real (browser Web Speech API) | (part of Command Center) |
 | 16 | Voice Layer (STT + Wake Word) | ✅ Done | Real (browser Web Speech API) | Voice Assistant |
-| 17 | Long-Term Memory & Knowledge Base | ⛔ Not started | — | Locked, P17 badge |
+| 17 | Long-Term Memory & Knowledge Base | ✅ Done | Real (Gemini embeddings + pgvector) | Knowledge Base |
 | 18 | Notifications, Calendar, Tasks | ⛔ Not started | — | Locked, P18 badge (Tasks/Calendar) |
 | 19 | Security, Monitoring, Cost Tracking | ⛔ Not started | — | — |
 | 20 | Production Deployment | ⛔ Not started | — | — |
@@ -103,6 +103,17 @@ Same free, no-API-key foundation as Phase 15 — uses `SpeechRecognition`/`webki
 - New page **`/dashboard/voice`** — a single continuous `SpeechRecognition` instance drives the whole session (armed → capturing → armed → …): arm the wake word or tap the mic → speak → silence-cutoff or manual tap sends the transcript to `/api/chat` (same endpoint Command Center uses, so it persists to the same `Conversation` table) → response streams back → Phase 15's TTS speaks it → listening resumes automatically if "continuous conversation" is on.
 - Real barge-in: a Stop button (or tapping the mic) while JARVIS is thinking/speaking cancels the request and speech immediately.
 - Dashboard's "Voice Sessions" stat card intentionally shows `"Live"` rather than a count — voice turns aren't tracked separately from text turns server-side (they go through the same `/api/chat` endpoint), so a fabricated session count would violate the "no UI number without a real query" rule. If per-channel tracking is wanted later, that needs an explicit `channel` field added to `Conversation`.
+
+### Phase 17 — Long-Term Memory & Knowledge Base ✅ — Real (Gemini embeddings + pgvector, no separate API key)
+Real semantic search, no mock layer — uses Gemini's free `text-embedding-004` endpoint (768-dim vectors, same `GOOGLE_AI_API_KEY` as everything else) plus pgvector for cosine-similarity search in Postgres.
+
+**⚠️ Requires a Docker image change.** `docker-compose.yml` now uses `pgvector/pgvector:pg16` instead of `postgres:16-alpine` — plain Postgres doesn't ship the vector extension. Anyone pulling this phase needs to run `docker compose up -d --force-recreate postgres` (or `docker compose down && docker compose up -d` if that's simpler) to pick up the new image, then `npx prisma migrate dev` as usual — the migration will run `CREATE EXTENSION IF NOT EXISTS vector`.
+
+- Two new models: `KnowledgeDocument` (documents you save) and `AgentMemory` (facts JARVIS is told to remember). Both have an `embedding Unsupported("vector(768)")?` column — Prisma Client has no native vector type, so **all reads/writes touching `embedding` go through `$queryRaw`/`$executeRaw`**, not the normal typed Prisma Client methods. See `src/lib/knowledge/documents.ts` and `memory.ts`.
+- Documents/memories are created immediately (readable right away) even if embedding fails (e.g. missing API key) — they just won't show up in semantic search until re-embedded. The UI shows a "not searchable yet" badge in that case rather than hiding the item.
+- New page **`/dashboard/knowledge`** — Documents tab (save + semantic search) and Memories tab (remember + recall), both showing a similarity percentage on search results.
+- Three new Hermes tools: `remember_fact` (medium risk), `recall_memory` and `search_knowledge_base` (both low risk, read-only) — so the agent can use this from Command Center/voice, not just the dedicated page.
+- Hardened the sandbox's build-time Prisma stub (`node_modules/.prisma/client/default.js`) to handle `$queryRaw`/`$executeRaw`/`$transaction` gracefully — these are new as of this phase and the stub previously only handled model accessors like `db.user`.
 
 ---
 

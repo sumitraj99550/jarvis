@@ -1,6 +1,6 @@
 # JARVIS — AI Operating System
 
-A full-stack AI Operating System built incrementally across 20 phases. Currently through **Phase 16 of 20**.
+A full-stack AI Operating System built incrementally across 20 phases. Currently through **Phase 17 of 20**.
 
 See [`PROGRESS.md`](./PROGRESS.md) for the authoritative, continuously-updated log of what's done, what's stubbed, and what's left — read that first if you're picking this project back up after a break.
 
@@ -28,6 +28,10 @@ npm install
 
 # 2. Start local Postgres + Redis
 docker compose up -d
+# Postgres image includes the pgvector extension as of Phase 17 (needed for
+# Knowledge Base / long-term memory semantic search). If you set this project
+# up before Phase 17, run: docker compose down && docker compose up -d
+# to pick up the new image.
 
 # 3. Configure environment
 cp .env.example .env.local

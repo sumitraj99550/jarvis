@@ -87,8 +87,25 @@ export async function sendMessage(
 }
 
 // ---------------------------------------------------------------------------
-// Streaming helper — Phase 6
+// Embeddings — Phase 17 (Long-Term Memory & Knowledge Base)
 // ---------------------------------------------------------------------------
+/** Gemini's text embedding model — free tier, 768-dimensional vectors. */
+export const EMBEDDING_MODEL = "text-embedding-004" as const;
+
+/**
+ * Embeds a piece of text into a 768-dimensional vector for semantic
+ * search. Same free GOOGLE_AI_API_KEY as everything else — no separate
+ * service or paid API required.
+ */
+export async function embedText(text: string): Promise<number[]> {
+  const model = getClient().getGenerativeModel({ model: EMBEDDING_MODEL });
+  const result = await model.embedContent(text);
+  const values = result.embedding.values;
+  if (!values || values.length === 0) {
+    throw new Error("Empty embedding returned from Gemini API.");
+  }
+  return values;
+}
 /**
  * Stream a response from Gemini, yielding text chunks as they arrive.
  *

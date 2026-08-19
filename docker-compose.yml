@@ -1,6 +1,11 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    # Phase 17 (Long-Term Memory & Knowledge Base) needs the pgvector
+    # extension for semantic search — plain postgres:16-alpine doesn't
+    # ship it. This image is a drop-in replacement (same Postgres 16
+    # underneath, pgvector pre-installed) — no data format changes for
+    # existing tables.
+    image: pgvector/pgvector:pg16
     container_name: jarvis-postgres
     restart: unless-stopped
     environment:

@@ -10,7 +10,6 @@ import {
   Users,
   BarChart3,
   Zap,
-  Headphones,
   FileText,
 } from "lucide-react";
 import { getCurrentDbUser } from "@/lib/auth";
@@ -177,6 +176,7 @@ const ROADMAP = [
   { phase: 14, label: "Daily Briefing Engine", done: true },
   { phase: 15, label: "Voice Layer (Text-to-Speech)", done: true },
   { phase: 16, label: "Voice Layer (STT + Wake Word)", done: true },
+  { phase: 17, label: "Long-Term Memory & Knowledge Base", done: true },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -206,7 +206,7 @@ export default async function DashboardPage() {
               {greeting}, <span className="text-neon">{displayName}</span>
             </h2>
             <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
-              Phase 16 of 20 complete — voice input (STT + wake word) online.
+              Phase 17 of 20 complete — knowledge base &amp; memory online.
             </p>
           </div>
           <Badge variant="default" className="self-start sm:self-auto">
@@ -336,7 +336,7 @@ export default async function DashboardPage() {
               <div className="flex items-center gap-3 pt-1">
                 <Skeleton className="size-6 rounded-full" />
                 <span className="text-xs text-[var(--muted-foreground)]">
-                  Phases 15–20 unlocking progressively…
+                  Phases 18–20 unlocking progressively…
                 </span>
               </div>
             </CardContent>
@@ -352,12 +352,6 @@ export default async function DashboardPage() {
           </h3>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {[
-              {
-                title: "Long-Term Memory & Knowledge Base",
-                desc: "Persistent memory and a searchable knowledge base.",
-                icon: Headphones,
-                phase: 17,
-              },
               {
                 title: "Notifications, Calendar, Tasks",
                 desc: "Unified task management, calendar, and notifications.",

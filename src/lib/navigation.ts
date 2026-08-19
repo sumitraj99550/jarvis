@@ -119,7 +119,6 @@ export const navigation: NavGroup[] = [
         href: "/dashboard/knowledge",
         icon: BookOpen,
         phase: 17,
-        disabled: true,
       },
     ],
   },
