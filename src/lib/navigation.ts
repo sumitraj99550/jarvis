@@ -130,14 +130,12 @@ export const navigation: NavGroup[] = [
         href: "/dashboard/tasks",
         icon: CheckSquare,
         phase: 18,
-        disabled: true,
       },
       {
         label: "Calendar",
         href: "/dashboard/calendar",
         icon: CalendarDays,
         phase: 18,
-        disabled: true,
       },
       {
         label: "Automations",
@@ -161,7 +159,6 @@ export const navigation: NavGroup[] = [
         href: "/dashboard/settings",
         icon: Settings,
         phase: 19,
-        disabled: true,
       },
     ],
   },

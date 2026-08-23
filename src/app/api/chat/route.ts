@@ -3,6 +3,7 @@ import { NextRequest } from "next/server";
 import { streamMessage, type ChatTurn } from "@/lib/ai";
 import { getCurrentDbUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { checkRateLimit } from "@/lib/rate-limit";
 
 const MAX_CONTEXT_TURNS = 10;
 const MAX_MESSAGE_LENGTH = 4000;
@@ -48,6 +49,26 @@ export async function POST(req: NextRequest) {
       status: 401,
       headers: { "Content-Type": "application/json" },
     });
+  }
+
+  // ---------------------------------------------------------------------
+  // Rate limit — Phase 19. 20 chat messages per 5 minutes per user,
+  // real Redis-backed counter (see src/lib/rate-limit.ts).
+  // ---------------------------------------------------------------------
+  const rl = await checkRateLimit(`chat:${user.id}`, 20, 300);
+  if (!rl.allowed) {
+    return new Response(
+      JSON.stringify({
+        error: `Rate limit exceeded. Try again in ${rl.resetsInSeconds}s.`,
+      }),
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": String(rl.resetsInSeconds),
+        },
+      },
+    );
   }
 
   // -------------------------------------------------------------------------
@@ -116,7 +137,10 @@ export async function POST(req: NextRequest) {
       let fullText = "";
 
       try {
-        const chunks = await streamMessage(message, contextTurns);
+        const chunks = await streamMessage(message, contextTurns, {
+          feature: "chat",
+          userId: user.id,
+        });
 
         for await (const chunk of chunks) {
           fullText += chunk;

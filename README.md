@@ -1,6 +1,6 @@
 # JARVIS — AI Operating System
 
-A full-stack AI Operating System built incrementally across 20 phases. Currently through **Phase 17 of 20**.
+A full-stack AI Operating System built incrementally across 20 phases. Currently through **Phase 19 of 20**.
 
 See [`PROGRESS.md`](./PROGRESS.md) for the authoritative, continuously-updated log of what's done, what's stubbed, and what's left — read that first if you're picking this project back up after a break.
 

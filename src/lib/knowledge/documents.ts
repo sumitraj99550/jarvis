@@ -65,7 +65,10 @@ export async function createDocument(
 
   let embeddingError: string | null = null;
   try {
-    const embedding = await embedText(`${title}\n\n${content}`);
+    const embedding = await embedText(`${title}\n\n${content}`, {
+      feature: "knowledge-embed",
+      userId: ownerId,
+    });
     const literal = toVectorLiteral(embedding);
     await db.$executeRaw`
       UPDATE knowledge_documents
@@ -111,7 +114,10 @@ export async function searchDocuments(
   query: string,
   limit = 5,
 ): Promise<KnowledgeSearchResult[]> {
-  const queryEmbedding = await embedText(query);
+  const queryEmbedding = await embedText(query, {
+    feature: "knowledge-search",
+    userId: ownerId,
+  });
   const literal = toVectorLiteral(queryEmbedding);
 
   const rows = await db.$queryRaw<

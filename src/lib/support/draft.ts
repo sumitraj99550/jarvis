@@ -32,6 +32,7 @@ export async function generateDraftReply(input: {
   customer: string;
   priority: string;
   messages: TicketMessageDTO[];
+  userId?: string;
 }): Promise<string> {
   const transcript = threadToTranscript(input.messages);
 
@@ -50,6 +51,9 @@ ${transcript}
 Draft the next reply from the support agent:`;
 
   const history: ChatTurn[] = [];
-  const draft = await sendMessage(prompt, history);
+  const draft = await sendMessage(prompt, history, {
+    feature: "support-draft",
+    userId: input.userId,
+  });
   return draft.trim();
 }

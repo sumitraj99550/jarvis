@@ -3,6 +3,10 @@ import { getCurrentDbUser } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { TICKET_PRIORITIES, TICKET_STATUSES } from "@/lib/support/types";
 import type { TicketPriority, TicketStatus } from "@/lib/support/types";
+import {
+  createNotification,
+  createNotificationForAllUsers,
+} from "@/lib/notifications";
 
 export const dynamic = "force-dynamic";
 
@@ -79,6 +83,24 @@ export async function POST(
     },
     include: { assignedTo: true },
   });
+
+  if (assignToMe) {
+    await createNotification({
+      userId: user.id,
+      title: "Ticket assigned to you",
+      body: ticket.subject,
+      type: "TICKET",
+      link: `/dashboard/support/${ticket.id}`,
+    });
+  }
+  if (status === "ESCALATED" && existing.status !== "ESCALATED") {
+    await createNotificationForAllUsers({
+      title: "Ticket escalated",
+      body: ticket.subject,
+      type: "WARNING",
+      link: `/dashboard/support/${ticket.id}`,
+    });
+  }
 
   return NextResponse.json({
     ticket: {

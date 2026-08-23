@@ -26,6 +26,7 @@ import { JARVIS_QUEUE_NAME, registerScheduledJobs } from "@/lib/queue";
 import { processHeartbeat } from "@/worker/processors/heartbeat";
 import { processDailyBriefing } from "@/worker/processors/daily-briefing";
 import { processSyncUser } from "@/worker/processors/sync-user";
+import { processTaskReminders } from "@/worker/processors/task-reminders";
 
 async function processor(job: Job) {
   switch (job.name) {
@@ -35,6 +36,8 @@ async function processor(job: Job) {
       return processDailyBriefing(job);
     case "sync-user":
       return processSyncUser(job);
+    case "task-reminders":
+      return processTaskReminders(job);
     default:
       throw new Error(`[worker] no processor registered for job "${job.name}"`);
   }
@@ -44,7 +47,9 @@ async function main() {
   console.log("[worker] starting JARVIS background worker…");
 
   await registerScheduledJobs();
-  console.log("[worker] scheduled jobs registered (heartbeat, daily-briefing)");
+  console.log(
+    "[worker] scheduled jobs registered (heartbeat, daily-briefing, task-reminders)",
+  );
 
   const worker = new Worker(JARVIS_QUEUE_NAME, processor, {
     connection: getRedisConnection(),

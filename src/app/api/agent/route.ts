@@ -3,6 +3,8 @@ import { NextRequest } from "next/server";
 import { HermesAgent } from "@/lib/hermes/agent";
 import { getCurrentDbUser } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { createNotification } from "@/lib/notifications";
+import { checkRateLimit } from "@/lib/rate-limit";
 import type { ChatTurn } from "@/lib/ai";
 import type { AgentEvent, PendingApprovalData } from "@/lib/hermes/types";
 
@@ -39,6 +41,27 @@ export async function POST(req: NextRequest) {
     return new Response(
       JSON.stringify({ error: "GOOGLE_AI_API_KEY is not configured." }),
       { status: 503, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  // ---------------------------------------------------------------------
+  // Rate limit — Phase 19. Hermes runs can make up to 5 Gemini calls each
+  // (agentic loop), so this gets a tighter cap than plain chat: 10 runs
+  // per 5 minutes per user.
+  // ---------------------------------------------------------------------
+  const rl = await checkRateLimit(`agent:${user.id}`, 10, 300);
+  if (!rl.allowed) {
+    return new Response(
+      JSON.stringify({
+        error: `Rate limit exceeded. Try again in ${rl.resetsInSeconds}s.`,
+      }),
+      {
+        status: 429,
+        headers: {
+          "Content-Type": "application/json",
+          "Retry-After": String(rl.resetsInSeconds),
+        },
+      },
     );
   }
 
@@ -115,6 +138,14 @@ export async function POST(req: NextRequest) {
               payload: data as unknown as Record<string, unknown>,
               status: "pending_approval",
             },
+          });
+
+          await createNotification({
+            userId: user.id,
+            title: "Approval needed",
+            body: `${data.toolLabel} — ${data.riskLevel} risk`,
+            type: "APPROVAL",
+            link: "/dashboard/command",
           });
 
           controller.enqueue(

@@ -2,9 +2,10 @@
 
 import React from "react";
 import { usePathname } from "next/navigation";
-import { Menu, Bell, Zap } from "lucide-react";
+import { Menu, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { navigation } from "@/lib/navigation";
+import { NotificationBell } from "@/components/notifications/notification-bell";
 
 interface TopNavProps {
   onMobileMenuOpen: () => void;
@@ -78,16 +79,8 @@ export function TopNav({ onMobileMenuOpen }: TopNavProps) {
           </span>
         </div>
 
-        {/* Notification bell — wired up in Phase 18 */}
-        <button
-          aria-label="Notifications (coming in Phase 18)"
-          title="Notifications — Phase 18"
-          className="relative rounded-md p-1.5 text-[var(--muted-foreground)] transition-colors hover:bg-[var(--secondary)]/40 hover:text-[var(--foreground)]"
-        >
-          <Bell className="size-4" />
-          {/* Badge placeholder */}
-          <span className="absolute top-1 right-1 size-1.5 rounded-full bg-[var(--primary)] opacity-0" />
-        </button>
+        {/* Notification bell — real, Phase 18 */}
+        <NotificationBell />
       </div>
     </header>
   );

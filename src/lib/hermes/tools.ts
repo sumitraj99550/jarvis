@@ -31,6 +31,11 @@ export const TOOL_DECLARATIONS: FunctionDeclaration[] = [
           enum: ["LOW", "MEDIUM", "HIGH", "URGENT"],
           description: "Task priority — default MEDIUM if not specified",
         },
+        dueDate: {
+          type: SchemaType.STRING,
+          description:
+            "ISO 8601 due date/time, if the user mentioned one. Omit if no due date was given.",
+        },
       },
       required: ["title"],
     },
@@ -194,16 +199,20 @@ export async function executeTool(
       const title = String(args.title ?? "Untitled task");
       const priority =
         (args.priority as "LOW" | "MEDIUM" | "HIGH" | "URGENT") ?? "MEDIUM";
+      const dueDate =
+        typeof args.dueDate === "string" && args.dueDate
+          ? new Date(args.dueDate)
+          : undefined;
 
       const task = await db.task.create({
-        data: { title, priority, userId: ctx.userId, status: "TODO" },
+        data: { title, priority, dueDate, userId: ctx.userId, status: "TODO" },
       });
 
       return {
         result: { id: task.id, title: task.title, priority: task.priority },
         record: {
           label: "Create task",
-          summary: `Created: "${title}" (${priority})`,
+          summary: `Created: "${title}" (${priority})${dueDate ? `, due ${dueDate.toLocaleDateString()}` : ""}`,
         },
       };
     }

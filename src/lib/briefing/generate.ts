@@ -10,6 +10,7 @@
 
 import { db } from "@/lib/db";
 import { sendMessage, type ChatTurn } from "@/lib/ai";
+import { createNotificationForAllUsers } from "@/lib/notifications";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -123,7 +124,9 @@ export async function generateDailyBriefing(): Promise<{
 
   let summary: string;
   try {
-    summary = await sendMessage(statsToPrompt(stats), [] as ChatTurn[]);
+    summary = await sendMessage(statsToPrompt(stats), [] as ChatTurn[], {
+      feature: "briefing",
+    });
   } catch (err) {
     // GOOGLE_AI_API_KEY missing/invalid — don't fail the whole job, fall
     // back to a plain-text rendering of the real numbers so the briefing
@@ -141,6 +144,13 @@ export async function generateDailyBriefing(): Promise<{
 
   const briefing = await db.briefing.create({
     data: { summary: summary.trim(), stats: stats as object },
+  });
+
+  await createNotificationForAllUsers({
+    title: "Daily briefing ready",
+    body: summary.trim().slice(0, 140),
+    type: "BRIEFING",
+    link: "/dashboard/briefings",
   });
 
   return { id: briefing.id as string, summary: summary.trim(), stats };

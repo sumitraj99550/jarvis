@@ -5,6 +5,7 @@ import {
   type Part,
 } from "@google/generative-ai";
 import { AI_MODEL, type ChatTurn } from "@/lib/ai";
+import { logAiUsage } from "@/lib/usage/track";
 import { TOOL_DECLARATIONS, executeTool } from "./tools";
 import {
   requiresApproval,
@@ -95,10 +96,16 @@ export class HermesAgent {
     const MAX_ROUNDS = 5;
     let currentParts: Part[] = [{ text: message }];
     let finalText = "";
+    let promptTokens = 0;
+    let completionTokens = 0;
 
     for (let round = 0; round < MAX_ROUNDS; round++) {
       const result = await chat.sendMessage(currentParts);
       const response = result.response;
+      if (response.usageMetadata) {
+        promptTokens += response.usageMetadata.promptTokenCount ?? 0;
+        completionTokens += response.usageMetadata.candidatesTokenCount ?? 0;
+      }
       const functionCalls = response.functionCalls();
 
       if (!functionCalls || functionCalls.length === 0) {
@@ -168,6 +175,19 @@ export class HermesAgent {
     if (!finalText) {
       finalText =
         "I have completed the requested actions. Let me know if you need anything else.";
+    }
+
+    if (promptTokens > 0 || completionTokens > 0) {
+      void logAiUsage({
+        feature: "hermes",
+        model: AI_MODEL,
+        usage: {
+          promptTokenCount: promptTokens,
+          candidatesTokenCount: completionTokens,
+          totalTokenCount: promptTokens + completionTokens,
+        },
+        userId: ctx.userId,
+      });
     }
 
     return { finalText, tools };

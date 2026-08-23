@@ -26,6 +26,8 @@ export type JobRegistry = {
   "daily-briefing": Record<string, never>;
   /** Upserts a Clerk user into the database (webhook fallback / manual sync). */
   "sync-user": { clerkId: string; email: string; name?: string | null };
+  /** Notifies users of tasks due within 24h. Phase 18. Runs hourly. */
+  "task-reminders": Record<string, never>;
 };
 
 export type JobName = keyof JobRegistry;
@@ -66,5 +68,11 @@ export async function registerScheduledJobs() {
     "scheduled-daily-briefing",
     { pattern: "0 8 * * *" },
     { name: "daily-briefing", data: {} },
+  );
+
+  await queue.upsertJobScheduler(
+    "scheduled-task-reminders",
+    { pattern: "0 * * * *" },
+    { name: "task-reminders", data: {} },
   );
 }

@@ -44,6 +44,7 @@ export async function POST(
       customer: ticket.customer,
       priority: ticket.priority,
       messages,
+      userId: user.id,
     });
 
     return NextResponse.json({ draft });

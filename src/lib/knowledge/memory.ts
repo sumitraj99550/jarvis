@@ -40,7 +40,10 @@ export async function rememberFact(
   const created = await db.agentMemory.create({ data: { ownerId, content } });
 
   try {
-    const embedding = await embedText(content);
+    const embedding = await embedText(content, {
+      feature: "memory-embed",
+      userId: ownerId,
+    });
     const literal = toVectorLiteral(embedding);
     await db.$executeRaw`
       UPDATE agent_memories
@@ -72,7 +75,10 @@ export async function recallMemories(
   query: string,
   limit = 5,
 ): Promise<MemorySearchResult[]> {
-  const queryEmbedding = await embedText(query);
+  const queryEmbedding = await embedText(query, {
+    feature: "memory-search",
+    userId: ownerId,
+  });
   const literal = toVectorLiteral(queryEmbedding);
 
   const rows = await db.$queryRaw<

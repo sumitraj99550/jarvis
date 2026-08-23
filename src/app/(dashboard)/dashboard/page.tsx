@@ -177,6 +177,8 @@ const ROADMAP = [
   { phase: 15, label: "Voice Layer (Text-to-Speech)", done: true },
   { phase: 16, label: "Voice Layer (STT + Wake Word)", done: true },
   { phase: 17, label: "Long-Term Memory & Knowledge Base", done: true },
+  { phase: 18, label: "Notifications, Calendar, Task Management", done: true },
+  { phase: 19, label: "Security, Monitoring, Cost Tracking", done: true },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -206,7 +208,8 @@ export default async function DashboardPage() {
               {greeting}, <span className="text-neon">{displayName}</span>
             </h2>
             <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
-              Phase 17 of 20 complete — knowledge base &amp; memory online.
+              Phase 19 of 20 complete — security, monitoring &amp; cost tracking
+              online.
             </p>
           </div>
           <Badge variant="default" className="self-start sm:self-auto">
@@ -336,7 +339,7 @@ export default async function DashboardPage() {
               <div className="flex items-center gap-3 pt-1">
                 <Skeleton className="size-6 rounded-full" />
                 <span className="text-xs text-[var(--muted-foreground)]">
-                  Phases 18–20 unlocking progressively…
+                  Phase 20 unlocking next…
                 </span>
               </div>
             </CardContent>
@@ -353,10 +356,10 @@ export default async function DashboardPage() {
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {[
               {
-                title: "Notifications, Calendar, Tasks",
-                desc: "Unified task management, calendar, and notifications.",
+                title: "Production Deployment",
+                desc: "Deployment pipeline and production configuration.",
                 icon: FileText,
-                phase: 18,
+                phase: 20,
               },
             ].map((item) => {
               const Icon = item.icon;

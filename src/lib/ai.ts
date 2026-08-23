@@ -1,4 +1,5 @@
 import { GoogleGenerativeAI, type Content } from "@google/generative-ai";
+import { logAiUsage } from "@/lib/usage/track";
 
 /**
  * Google Gemini AI client.
@@ -74,6 +75,7 @@ function toGeminiHistory(turns: ChatTurn[]): Content[] {
 export async function sendMessage(
   message: string,
   history: ChatTurn[],
+  tracking?: { feature: string; userId?: string },
 ): Promise<string> {
   const model = getClient().getGenerativeModel({
     model: AI_MODEL,
@@ -83,6 +85,16 @@ export async function sendMessage(
   const result = await chat.sendMessage(message);
   const text = result.response.text();
   if (!text) throw new Error("Empty response from Gemini API.");
+
+  if (tracking) {
+    void logAiUsage({
+      feature: tracking.feature,
+      model: AI_MODEL,
+      usage: result.response.usageMetadata,
+      userId: tracking.userId,
+    });
+  }
+
   return text;
 }
 
@@ -97,13 +109,34 @@ export const EMBEDDING_MODEL = "text-embedding-004" as const;
  * search. Same free GOOGLE_AI_API_KEY as everything else — no separate
  * service or paid API required.
  */
-export async function embedText(text: string): Promise<number[]> {
+export async function embedText(
+  text: string,
+  tracking?: { feature: string; userId?: string },
+): Promise<number[]> {
   const model = getClient().getGenerativeModel({ model: EMBEDDING_MODEL });
   const result = await model.embedContent(text);
   const values = result.embedding.values;
   if (!values || values.length === 0) {
     throw new Error("Empty embedding returned from Gemini API.");
   }
+
+  if (tracking) {
+    // Embedding responses don't report token usage in this SDK version —
+    // approximate prompt tokens as ~4 chars/token (a commonly used rough
+    // ratio) purely so the usage log has a non-zero entry for embedding
+    // calls; cost is $0 either way (EMBEDDING_MODEL pricing is free).
+    void logAiUsage({
+      feature: tracking.feature,
+      model: EMBEDDING_MODEL,
+      usage: {
+        promptTokenCount: Math.ceil(text.length / 4),
+        candidatesTokenCount: 0,
+        totalTokenCount: Math.ceil(text.length / 4),
+      },
+      userId: tracking.userId,
+    });
+  }
+
   return values;
 }
 /**
@@ -117,6 +150,7 @@ export async function embedText(text: string): Promise<number[]> {
 export async function streamMessage(
   message: string,
   history: ChatTurn[],
+  tracking?: { feature: string; userId?: string },
 ): Promise<AsyncIterable<string>> {
   const model = getClient().getGenerativeModel({
     model: AI_MODEL,
@@ -133,6 +167,21 @@ export async function streamMessage(
       for await (const chunk of result.stream) {
         const text = chunk.text();
         if (text) yield text;
+      }
+      // usageMetadata is only available on the final aggregated response,
+      // resolved once the whole stream has been consumed.
+      if (tracking) {
+        try {
+          const finalResponse = await result.response;
+          void logAiUsage({
+            feature: tracking.feature,
+            model: AI_MODEL,
+            usage: finalResponse.usageMetadata,
+            userId: tracking.userId,
+          });
+        } catch {
+          // Don't let usage tracking affect the stream's completion.
+        }
       }
     },
   };

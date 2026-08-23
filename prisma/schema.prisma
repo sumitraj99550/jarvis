@@ -72,6 +72,9 @@ model User {
   assignedTickets    Ticket[]
   knowledgeDocuments KnowledgeDocument[]
   agentMemories      AgentMemory[]
+  calendarEvents     CalendarEvent[]
+  notifications      Notification[]
+  aiUsageLogs        AiUsageLog[]
 
   @@map("users")
 }
@@ -110,7 +113,7 @@ model Conversation {
 //   - Re-add the MemoryEmbedding model
 
 // ---------------------------------------------------------------------------
-// Task management (Phase 18)
+// Task management, Calendar, Notifications (Phase 18)
 // ---------------------------------------------------------------------------
 
 enum TaskStatus {
@@ -130,8 +133,12 @@ enum TaskPriority {
 model Task {
   id            String       @id @default(cuid())
   title         String
+  description   String?      @db.Text
   status        TaskStatus   @default(TODO)
   priority      TaskPriority @default(MEDIUM)
+  dueDate       DateTime?
+  /** Set once a due-date reminder notification has been sent — prevents duplicates. */
+  reminderSentAt DateTime?
   // Free-text agent name (e.g. "hermes", "support-agent").
   // Will be replaced with a proper Agent FK in Phase 7.
   assignedAgent String?
@@ -141,7 +148,51 @@ model Task {
   updatedAt     DateTime     @updatedAt
 
   @@index([userId, status])
+  @@index([dueDate])
   @@map("tasks")
+}
+
+model CalendarEvent {
+  id          String   @id @default(cuid())
+  title       String
+  description String?  @db.Text
+  location    String?
+  startAt     DateTime
+  endAt       DateTime?
+  allDay      Boolean  @default(false)
+  userId      String
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, startAt])
+  @@map("calendar_events")
+}
+
+enum NotificationType {
+  INFO
+  SUCCESS
+  WARNING
+  TASK
+  APPROVAL
+  BRIEFING
+  TICKET
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  title     String
+  body      String?          @db.Text
+  type      NotificationType @default(INFO)
+  /** Optional in-app link, e.g. "/dashboard/support/abc123" */
+  link      String?
+  read      Boolean          @default(false)
+  userId    String
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime         @default(now())
+
+  @@index([userId, read, createdAt])
+  @@map("notifications")
 }
 
 // ---------------------------------------------------------------------------
@@ -421,6 +472,33 @@ model RevenueSettings {
   updatedAt       DateTime @updatedAt
 
   @@map("revenue_settings")
+}
+
+// ---------------------------------------------------------------------------
+// Security, Monitoring, Cost Tracking (Phase 19)
+// ---------------------------------------------------------------------------
+// REAL — every row here comes from an actual Gemini API response's
+// `usageMetadata` field, not an estimate or simulation. Cost is computed
+// from Gemini's published per-token pricing (see src/lib/usage/pricing.ts)
+// purely for visibility — on the free tier the real dollar cost is $0, but
+// seeing "what this would cost on a paid plan" is the point of tracking it.
+
+model AiUsageLog {
+  id                  String   @id @default(cuid())
+  /** Which part of the app made the call — "chat", "hermes", "support-draft", "briefing", "embedding", etc. */
+  feature             String
+  model               String
+  promptTokens        Int
+  completionTokens    Int
+  totalTokens         Int
+  estimatedCostMicros Int      @default(0)
+  userId              String?
+  user                User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  createdAt           DateTime @default(now())
+
+  @@index([userId, createdAt])
+  @@index([feature, createdAt])
+  @@map("ai_usage_logs")
 }
 
 // ---------------------------------------------------------------------------
