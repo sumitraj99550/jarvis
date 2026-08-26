@@ -1,7 +1,7 @@
 # JARVIS — Progress Tracker
 
-**Last updated:** Phase 19 (Security, Monitoring, Cost Tracking)
-**Status:** Phase 19 of 20 complete and verified. Phases 1–19 all functionally connected (audited and fixed — see "Phase 1–10 Audit" below).
+**Last updated:** Phase 20 (Production Deployment) — all 20 phases complete
+**Status:** All 20 phases shipped and verified. See "What's real vs. mock" in each phase section below, and [`DEPLOYMENT.md`](./DEPLOYMENT.md) for taking this to production.
 
 > **Rule for whoever (human or Claude) touches this project next: update this file in the SAME response that ships code changes — not after, not "later." If you shipped a ZIP, this file must reflect it before you're done.** See "How to update this file" at the bottom.
 
@@ -30,7 +30,7 @@
 | 17 | Long-Term Memory & Knowledge Base | ✅ Done | Real (Gemini embeddings + pgvector) | Knowledge Base |
 | 18 | Notifications, Calendar, Task Management | ✅ Done | Real | Tasks, Calendar, notification bell |
 | 19 | Security, Monitoring, Cost Tracking | ✅ Done | Real | Settings |
-| 20 | Production Deployment | ⛔ Not started | — | — |
+| 20 | Production Deployment | ✅ Done | Real (config/infra) | — |
 | — | Analytics | ⛔ Not scoped to any phase yet | — | Locked, no badge |
 | — | Automations (builder UI) | ⛔ Not scoped to any phase yet | — | Locked, no badge |
 
@@ -133,6 +133,20 @@ Three connected features, all genuinely functional and fed by real triggers else
 - **Real Redis-backed rate limiting** (`src/lib/rate-limit.ts`, fixed-window via `INCR`/`EXPIRE` on the same Redis instance BullMQ already uses) — 20 chat messages / 5 min and 10 Hermes agent runs / 5 min, per user. Returns HTTP 429 + `Retry-After`. Fails *open* (allows the request) if Redis is unreachable, so a rate-limiter outage never takes down the feature it protects.
 - **Real security headers** in `next.config.mjs` — X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy (explicitly allows microphone for Phases 15/16, denies camera/geolocation). **Content-Security-Policy intentionally deferred to Phase 20** — getting CSP directives wrong for Clerk's hosted UI risks silently breaking sign-in, and this needs testing against a real deployed origin, not guessed at in local dev.
 - Settings nav item enabled.
+
+### Phase 20 — Production Deployment ✅ — Real config/infra, honestly scoped
+No live deployment exists (this project has no hosting account or domain) — but everything needed to actually deploy is real, not aspirational documentation:
+
+- **`next.config.mjs`**: `output: "standalone"` enabled (verified the build still produces `.next/standalone/server.js` correctly). **Content-Security-Policy implemented** (deferred from Phase 19) — real directives matching Clerk's documented CSP requirements, gated behind `ENABLE_CSP=true` (off by default) since it needs verification against a real deployed origin before being safe to rely on.
+- **`GET /api/health`** — real DB + Redis checks (not a hardcoded 200), returns 503 on failure so orchestrators can act on it. Unauthenticated by design (load balancers can't log in).
+- **`Dockerfile`** (multi-stage, non-root user, wired to `/api/health` via `HEALTHCHECK`) for the app, **`Dockerfile.worker`** for the background worker as a separate long-running process (can't run on pure serverless — see DEPLOYMENT.md for why this matters), **`docker-entrypoint.sh`** runs `prisma migrate deploy` against the real production DB on every container start.
+- **`docker-compose.prod.yml`** — full self-hosted stack (app + worker + Postgres/pgvector + Redis), Postgres/Redis ports intentionally not exposed to the host.
+- **`.env.production.example`** — production env template; hostnames correctly use Docker service names (`postgres`, `redis`), not `localhost`.
+- **`DEPLOYMENT.md`** — genuine deployment guide (Docker self-host as primary path, split Vercel+worker-elsewhere as an alternative), explicit about the worker-process constraint that rules out plain serverless.
+- **Fixed a real pre-existing bug while in `.gitignore`**: the `.env*` pattern was also silently excluding `.env.example` and `.env.production.example` from git — meaning the templates meant to be shared would never actually get committed. Added explicit `!.env.example` / `!.env.production.example` negations.
+- `package.json` gained `docker:build`/`docker:up`/`docker:down`/`docker:logs` convenience scripts.
+
+**What Phase 20 does NOT claim**: no CI/CD pipeline, no actual tested live deployment, no log aggregation/APM, no automated Postgres backups. All stated explicitly in `DEPLOYMENT.md`'s "What Phase 20 does NOT include" section rather than left implicit.
 
 ---
 

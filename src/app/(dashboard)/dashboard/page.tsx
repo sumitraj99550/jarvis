@@ -10,7 +10,6 @@ import {
   Users,
   BarChart3,
   Zap,
-  FileText,
 } from "lucide-react";
 import { getCurrentDbUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -23,7 +22,6 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 
 export const dynamic = "force-dynamic";
 
@@ -179,6 +177,7 @@ const ROADMAP = [
   { phase: 17, label: "Long-Term Memory & Knowledge Base", done: true },
   { phase: 18, label: "Notifications, Calendar, Task Management", done: true },
   { phase: 19, label: "Security, Monitoring, Cost Tracking", done: true },
+  { phase: 20, label: "Production Deployment", done: true },
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -208,8 +207,7 @@ export default async function DashboardPage() {
               {greeting}, <span className="text-neon">{displayName}</span>
             </h2>
             <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
-              Phase 19 of 20 complete — security, monitoring &amp; cost tracking
-              online.
+              All 20 phases complete — JARVIS is fully built.
             </p>
           </div>
           <Badge variant="default" className="self-start sm:self-auto">
@@ -334,55 +332,34 @@ export default async function DashboardPage() {
                   </Badge>
                 </div>
               ))}
-
-              {/* Collapsed remainder */}
-              <div className="flex items-center gap-3 pt-1">
-                <Skeleton className="size-6 rounded-full" />
-                <span className="text-xs text-[var(--muted-foreground)]">
-                  Phase 20 unlocking next…
-                </span>
-              </div>
             </CardContent>
           </Card>
         </div>
 
         {/* ------------------------------------------------------------------ */}
-        {/* Quick-access grid — links to future features                      */}
+        {/* All phases shipped                                                */}
         {/* ------------------------------------------------------------------ */}
         <div>
-          <h3 className="mb-3 text-xs font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
-            Coming Next
-          </h3>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {[
-              {
-                title: "Production Deployment",
-                desc: "Deployment pipeline and production configuration.",
-                icon: FileText,
-                phase: 20,
-              },
-            ].map((item) => {
-              const Icon = item.icon;
-              return (
-                <div
-                  key={item.title}
-                  className="glass-panel cursor-default space-y-2 p-4 opacity-70"
-                >
-                  <div className="flex items-center gap-2">
-                    <Icon className="size-4 text-[var(--muted-foreground)]" />
-                    <span className="text-sm font-medium text-[var(--foreground)]">
-                      {item.title}
-                    </span>
-                    <Badge variant="muted" className="ml-auto">
-                      P{item.phase}
-                    </Badge>
-                  </div>
-                  <p className="text-xs text-[var(--muted-foreground)]">
-                    {item.desc}
-                  </p>
-                </div>
-              );
-            })}
+          <div className="glass-panel neon-glow flex items-center gap-3 p-4">
+            <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[var(--primary)]/15">
+              <Zap className="text-neon size-4" />
+            </div>
+            <div>
+              <p className="text-sm font-medium text-[var(--foreground)]">
+                All 20 phases shipped
+              </p>
+              <p className="text-xs text-[var(--muted-foreground)]">
+                See{" "}
+                <code className="rounded bg-[var(--muted)] px-1">
+                  PROGRESS.md
+                </code>{" "}
+                for what&apos;s real vs. mock across every phase, and{" "}
+                <code className="rounded bg-[var(--muted)] px-1">
+                  DEPLOYMENT.md
+                </code>{" "}
+                for taking this to production.
+              </p>
+            </div>
           </div>
         </div>
       </div>

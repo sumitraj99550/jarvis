@@ -1,0 +1,38 @@
+# syntax=docker/dockerfile:1
+# ---------------------------------------------------------------------------
+# JARVIS — Production Dockerfile (background worker)
+# ---------------------------------------------------------------------------
+# The worker (Phase 9) is a separate long-running Node.js process from the
+# Next.js app — it can't run on serverless platforms that only support
+# short-lived request/response functions (e.g. plain Vercel). This image
+# runs it standalone, typically alongside the app container via
+# docker-compose.prod.yml, or as a separate service on a platform that
+# supports long-running containers (Railway, Render, Fly.io, a VPS, etc).
+#
+# Build:  docker build -f Dockerfile.worker -t jarvis-worker .
+# Run:    docker run --env-file .env.production jarvis-worker
+
+FROM node:22-alpine AS deps
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY prisma ./prisma
+COPY prisma.config.ts ./
+RUN npm ci
+
+FROM node:22-alpine AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+RUN addgroup --system --gid 1001 nodejs \
+  && adduser --system --uid 1001 jarvis
+
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+RUN npx prisma generate
+
+USER jarvis
+
+# No HTTP port — this process only connects outbound to Postgres/Redis and
+# the Gemini API. Health is observed via `/api/queue/status` on the app
+# container instead (see README's "Available Scripts" section).
+CMD ["npx", "tsx", "src/worker/index.ts"]

@@ -11,11 +11,15 @@
     "lint": "eslint",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "postinstall": "prisma generate || echo 'prisma generate failed — run it manually after confirming DATABASE_URL is set'",
+    "postinstall": "prisma generate || echo 'prisma generate failed \u2014 run it manually after confirming DATABASE_URL is set'",
     "db:push": "prisma db push",
     "db:migrate": "prisma migrate dev",
     "db:studio": "prisma studio",
-    "db:seed": "tsx prisma/seed.ts"
+    "db:seed": "tsx prisma/seed.ts",
+    "docker:build": "docker compose -f docker-compose.prod.yml build",
+    "docker:up": "docker compose -f docker-compose.prod.yml --env-file .env.production up -d",
+    "docker:down": "docker compose -f docker-compose.prod.yml down",
+    "docker:logs": "docker compose -f docker-compose.prod.yml logs -f"
   },
   "dependencies": {
     "@clerk/nextjs": "^7.5.17",

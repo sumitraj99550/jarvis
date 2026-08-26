@@ -1,0 +1,87 @@
+# ---------------------------------------------------------------------------
+# JARVIS — Production Compose (Phase 20)
+# ---------------------------------------------------------------------------
+# Full self-hosted stack: app, worker, Postgres (pgvector), Redis. Use this
+# for a VPS / self-managed deployment. It is NOT what you run for local
+# development — use docker-compose.yml (Postgres + Redis only) alongside
+# `npm run dev` / `npm run worker` for that.
+#
+# Usage:
+#   cp .env.production.example .env.production   # fill in real values
+#   docker compose -f docker-compose.prod.yml --env-file .env.production up -d --build
+#
+# Postgres/Redis ports are intentionally NOT published to the host here
+# (unlike docker-compose.yml) — only the app and worker containers reach
+# them, over the internal Docker network. Expose the app's port 3000
+# through your own reverse proxy / load balancer with TLS in front of it;
+# this compose file does not set up TLS itself.
+# ---------------------------------------------------------------------------
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: jarvis-postgres-prod
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-jarvis}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set in .env.production}
+      POSTGRES_DB: ${POSTGRES_DB:-jarvis}
+    volumes:
+      - jarvis_postgres_prod_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-jarvis}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: jarvis-redis-prod
+    restart: unless-stopped
+    volumes:
+      - jarvis_redis_prod_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jarvis-app-prod
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env.production
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: jarvis-worker-prod
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - .env.production
+
+volumes:
+  jarvis_postgres_prod_data:
+  jarvis_redis_prod_data:

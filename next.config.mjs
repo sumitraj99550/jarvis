@@ -5,6 +5,15 @@
  */
 const nextConfig = {
   /**
+   * Phase 20: produces a self-contained `.next/standalone` build with only
+   * the production dependencies actually used, traced automatically. This
+   * is what Dockerfile copies into the final image layer — without it,
+   * the image would need the full node_modules (much larger, slower to
+   * build/deploy).
+   */
+  output: "standalone",
+
+  /**
    * Server-external packages — do not bundle these with Turbopack/webpack.
    *
    * - `@prisma/client`   : the generated Prisma client uses WASM + native
@@ -45,14 +54,30 @@ const nextConfig = {
    * - Permissions-Policy: explicitly allows microphone (Phase 15/16 voice
    *   features need it) and denies camera/geolocation, which nothing in
    *   this app uses.
-   * - CSP is intentionally NOT set here: Clerk's hosted auth UI, several
-   *   third-party script/style origins, and Next.js's own inline
-   *   hydration scripts all need explicit allowlisting to avoid breaking
-   *   the app, and getting that wrong silently breaks sign-in. Deferred to
-   *   Phase 20 (Production Deployment) where it can be tested against a
-   *   real deployed origin instead of guessed at in local dev.
+   *
+   * Content-Security-Policy (Phase 20): now implemented, but gated behind
+   * `ENABLE_CSP=true` — off by default so local dev never breaks
+   * unexpectedly. Turn it on once deployed to a real origin and verify
+   * sign-in, the AI chat stream, and voice features (Phases 15/16) all
+   * still work before relying on it in production. Directives below are
+   * Clerk's documented CSP requirements (https://clerk.com/docs/security/clerk-csp)
+   * plus 'unsafe-inline'/'unsafe-eval' for Next.js's own hydration
+   * scripts and Tailwind's runtime styles — tightening those further
+   * requires Next's experimental nonce support, left for a future pass.
    */
   async headers() {
+    const cspEnabled = process.env.ENABLE_CSP === "true";
+    const csp = [
+      "default-src 'self'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.accounts.dev https://clerk.*.lcl.dev",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: https://img.clerk.com https://*.clerk.accounts.dev",
+      "font-src 'self' data:",
+      "connect-src 'self' https://*.clerk.accounts.dev https://generativelanguage.googleapis.com wss://*.clerk.accounts.dev",
+      "frame-src 'self' https://*.clerk.accounts.dev",
+      "worker-src 'self' blob:",
+    ].join("; ");
+
     return [
       {
         source: "/:path*",
@@ -64,6 +89,9 @@ const nextConfig = {
             key: "Permissions-Policy",
             value: "microphone=(self), camera=(), geolocation=()",
           },
+          ...(cspEnabled
+            ? [{ key: "Content-Security-Policy", value: csp }]
+            : []),
         ],
       },
     ];

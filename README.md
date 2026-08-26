@@ -1,6 +1,6 @@
 # JARVIS — AI Operating System
 
-A full-stack AI Operating System built incrementally across 20 phases. Currently through **Phase 19 of 20**.
+A full-stack AI Operating System built incrementally across 20 phases. **All 20 phases complete.** See [`PROGRESS.md`](./PROGRESS.md) for what's real vs. mock in each phase, and [`DEPLOYMENT.md`](./DEPLOYMENT.md) for taking this to production.
 
 See [`PROGRESS.md`](./PROGRESS.md) for the authoritative, continuously-updated log of what's done, what's stubbed, and what's left — read that first if you're picking this project back up after a break.
 
@@ -114,6 +114,7 @@ npm run db:seed            # Seed local dev data
 ```
 jarvis/
 ├── PROGRESS.md                    # ← Read this first. Live status of every phase.
+├── DEPLOYMENT.md                  # Production deployment guide (Phase 20)
 ├── README.md                      # This file — setup & reference
 ├── docker-compose.yml             # Local Postgres + Redis
 ├── .env / .env.example            # Environment variables (see above)
