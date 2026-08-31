@@ -19,6 +19,8 @@ import { formatTime } from "@/lib/format";
 import { useSpeechRecognition } from "@/hooks/use-speech-recognition";
 import { useWakeWordDetector } from "@/hooks/use-wake-word";
 import { useTextToSpeech } from "@/hooks/use-text-to-speech";
+import { useMicPermission } from "@/hooks/use-mic-permission";
+import { useMicTest } from "@/hooks/use-mic-test";
 
 type Mode = "idle" | "armed" | "capturing" | "thinking" | "speaking";
 
@@ -77,14 +79,43 @@ export function VoiceAssistant({
   const tts = useTextToSpeech();
   // ONE continuous recognition instance for the entire session.
   const recognition = useSpeechRecognition({ continuous: true });
+  const micPermission = useMicPermission();
+  const micTest = useMicTest();
   const abortRef = useRef<AbortController | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const speakPollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  // Remembers whether we were armed/capturing right before the tab was
+  // backgrounded, so we can resume the same state instead of just
+  // silently staying paused — browsers throttle/kill media APIs in
+  // hidden tabs, which was a real cause of "sometimes it just stops."
+  const pausedByVisibilityRef = useRef<Mode | null>(null);
 
   const modeRef = useRef(mode);
   useEffect(() => {
     modeRef.current = mode;
   });
+
+  // Pause the recognition engine when the tab is backgrounded (browsers
+  // throttle/kill it anyway, so better to do it explicitly and resume
+  // cleanly) rather than let it die silently mid-session.
+  useEffect(() => {
+    function handleVisibility() {
+      if (document.hidden) {
+        if (modeRef.current === "armed" || modeRef.current === "capturing") {
+          pausedByVisibilityRef.current = modeRef.current;
+          recognition.stop();
+        }
+      } else if (pausedByVisibilityRef.current) {
+        const resumeMode = pausedByVisibilityRef.current;
+        pausedByVisibilityRef.current = null;
+        setMode(resumeMode);
+      }
+    }
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () =>
+      document.removeEventListener("visibilitychange", handleVisibility);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Keep the single recognition engine running whenever we're armed or
   // capturing; stop it when idle/thinking/speaking.
@@ -352,9 +383,62 @@ export function VoiceAssistant({
       {noSpeechSupport && (
         <p className="mb-4 flex items-center gap-1.5 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-400">
           <AlertTriangle className="size-3.5" />
-          Speech recognition isn&apos;t supported in this browser. Try Chrome or
-          Edge — Safari and Firefox have limited or no support for the Web
-          Speech API.
+          Speech recognition isn&apos;t supported in this browser. Voice input
+          needs Chrome or Edge — Safari and Firefox have limited or no support
+          for the Web Speech API. Text-to-speech (JARVIS talking back) still
+          works everywhere.
+        </p>
+      )}
+
+      {!noSpeechSupport &&
+        (micPermission.status === "denied" ||
+          micPermission.status === "prompt" ||
+          micPermission.status === "unknown") && (
+          <div className="mb-4 flex items-center justify-between gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2">
+            <p className="flex items-center gap-1.5 text-xs text-amber-400">
+              <AlertTriangle className="size-3.5" />
+              {micPermission.status === "denied"
+                ? "Microphone access was denied — enable it in your browser's site settings, then click Enable."
+                : "Microphone access needed before the wake word can work."}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => micPermission.requestAccess()}
+            >
+              Enable mic
+            </Button>
+          </div>
+        )}
+
+      {!noSpeechSupport && (
+        <div className="mb-4 flex items-center justify-between gap-2 rounded-md border border-[var(--border)] px-3 py-2">
+          <p className="text-xs text-[var(--muted-foreground)]">
+            Not sure if your mic is being picked up at all? Record a quick test
+            clip and play it back.
+          </p>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={micTest.runTest}
+            disabled={
+              micTest.state === "recording" || micTest.state === "playing"
+            }
+          >
+            {micTest.state === "recording" && (
+              <Loader2 className="size-3.5 animate-spin" />
+            )}
+            {micTest.state === "recording"
+              ? "Recording…"
+              : micTest.state === "playing"
+                ? "Playing back…"
+                : "Test my mic"}
+          </Button>
+        </div>
+      )}
+      {micTest.error && (
+        <p className="mb-4 text-xs text-[var(--destructive)]">
+          Mic test failed: {micTest.error}
         </p>
       )}
 
@@ -412,7 +496,17 @@ export function VoiceAssistant({
       <div className="flex flex-col items-center gap-3 border-t border-[var(--glass-border)] pt-4">
         <StatusBadge mode={mode} />
 
-        <div className="flex items-center gap-3">
+        <div className="relative flex items-center gap-3">
+          {(mode === "armed" || mode === "capturing") && (
+            <span
+              className={cn(
+                "absolute left-0 inline-flex size-16 animate-ping rounded-full opacity-40",
+                mode === "capturing"
+                  ? "bg-[var(--primary)]"
+                  : "bg-[var(--primary)]/60",
+              )}
+            />
+          )}
           <button
             type="button"
             onClick={handleMicClick}
@@ -425,7 +519,7 @@ export function VoiceAssistant({
                   : "Start talking"
             }
             className={cn(
-              "flex size-16 items-center justify-center rounded-full transition-all",
+              "relative flex size-16 items-center justify-center rounded-full transition-all",
               mode === "capturing"
                 ? "neon-glow bg-[var(--primary)] text-[var(--background)]"
                 : isBusy

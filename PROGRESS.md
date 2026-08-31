@@ -1,7 +1,7 @@
 # JARVIS — Progress Tracker
 
-**Last updated:** Phase 20 (Production Deployment) — all 20 phases complete
-**Status:** All 20 phases shipped and verified. See "What's real vs. mock" in each phase section below, and [`DEPLOYMENT.md`](./DEPLOYMENT.md) for taking this to production.
+**Last updated:** Post-launch improvement #1 — voice reliability fix (see `IMPROVEMENT_PLAN.md`)
+**Status:** All 20 phases shipped and verified. Now working through `IMPROVEMENT_PLAN.md` — post-launch fixes and polish beyond the original 20-phase roadmap. See "What's real vs. mock" in each phase section below, and [`DEPLOYMENT.md`](./DEPLOYMENT.md) for taking this to production.
 
 > **Rule for whoever (human or Claude) touches this project next: update this file in the SAME response that ships code changes — not after, not "later." If you shipped a ZIP, this file must reflect it before you're done.** See "How to update this file" at the bottom.
 
@@ -190,7 +190,14 @@ User-reported issues after trying the Voice Assistant for real: mic button unrel
 
 ---
 
-## Known limitations (be upfront about these, don't paper over them)
+## Post-launch improvements (see IMPROVEMENT_PLAN.md for full plan)
+
+With all 20 phases shipped, further work is tracked in `IMPROVEMENT_PLAN.md` (voice reliability, Analytics/Automations scoping, visual identity, dashboard redesign, mock→real readiness) rather than as new numbered phases.
+
+### #1 — Voice reliability fix ✅
+Root-caused three real issues with "hey JARVIS" not listening reliably: (1) silent mic permission loss mid-session with zero visible error, (2) browser tab-backgrounding silently killing the continuous recognition loop, (3) no way to tell if the mic itself was even being captured vs. the wake word just not matching. Fixed all three — see `IMPROVEMENT_PLAN.md` section 1 for the full breakdown. New files: `src/hooks/use-mic-permission.ts`, `src/hooks/use-mic-test.ts`.
+
+
 
 - **Phases 10–12 are mock-only.** Buffer, RevenueCat, and Meta Ads all require paid/business-verified accounts JARVIS's user doesn't have. The mock service layer is a deliberate, permanent-until-upgraded architecture choice, not a shortcut — see each phase's section above for the switch-over mechanism.
 - **Voice quality/availability (Phase 15) depends on the user's browser and OS**, not JARVIS. Some browsers ship very few voices; mobile Safari and Chrome differ significantly. There's no server-side fallback — if `window.speechSynthesis` isn't present, the speaker controls simply don't render (checked via `tts.isSupported`).
