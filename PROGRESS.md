@@ -1,6 +1,6 @@
 # JARVIS — Progress Tracker
 
-**Last updated:** Post-launch improvement #1 — voice reliability fix (see `IMPROVEMENT_PLAN.md`)
+**Last updated:** Post-launch improvement #5 — dashboard redesign (see `IMPROVEMENT_PLAN.md`)
 **Status:** All 20 phases shipped and verified. Now working through `IMPROVEMENT_PLAN.md` — post-launch fixes and polish beyond the original 20-phase roadmap. See "What's real vs. mock" in each phase section below, and [`DEPLOYMENT.md`](./DEPLOYMENT.md) for taking this to production.
 
 > **Rule for whoever (human or Claude) touches this project next: update this file in the SAME response that ships code changes — not after, not "later." If you shipped a ZIP, this file must reflect it before you're done.** See "How to update this file" at the bottom.
@@ -196,6 +196,9 @@ With all 20 phases shipped, further work is tracked in `IMPROVEMENT_PLAN.md` (vo
 
 ### #1 — Voice reliability fix ✅
 Root-caused three real issues with "hey JARVIS" not listening reliably: (1) silent mic permission loss mid-session with zero visible error, (2) browser tab-backgrounding silently killing the continuous recognition loop, (3) no way to tell if the mic itself was even being captured vs. the wake word just not matching. Fixed all three — see `IMPROVEMENT_PLAN.md` section 1 for the full breakdown. New files: `src/hooks/use-mic-permission.ts`, `src/hooks/use-mic-test.ts`.
+
+### #5 — Dashboard redesign ✅
+Homepage no longer leads with build-progress content. The 20-phase roadmap moved to a new `/dashboard/about` page; System Status moved to a new "System Status" tab in Settings (real checks, unchanged — just relocated). Homepage now shows live widgets built from real data: today's calendar, tasks due within 7 days (overdue flagged), 5 most recent notifications, and recent Command Center activity — alongside the existing real stat cards. New file: `src/app/(dashboard)/dashboard/about/page.tsx`.
 
 
 

@@ -29,17 +29,25 @@ type UsageData = {
   }>;
 };
 
-const TABS = ["usage", "security"] as const;
+type SystemStatusItem = {
+  label: string;
+  status: "operational" | "unreachable" | "not configured";
+  href?: string;
+};
+
+const TABS = ["system", "usage", "security"] as const;
 type Tab = (typeof TABS)[number];
 
 export function SettingsView({
   usage,
   canViewUsage,
+  systemStatus,
 }: {
   usage: UsageData | null;
   canViewUsage: boolean;
+  systemStatus: readonly SystemStatusItem[];
 }) {
-  const [tab, setTab] = useState<Tab>("usage");
+  const [tab, setTab] = useState<Tab>("system");
 
   return (
     <div className="space-y-6">
@@ -55,16 +63,59 @@ export function SettingsView({
                 : "text-[var(--muted-foreground)] hover:text-[var(--foreground)]"
             }`}
           >
-            {t === "usage" ? "Usage & Cost" : "Security"}
+            {t === "system"
+              ? "System Status"
+              : t === "usage"
+                ? "Usage & Cost"
+                : "Security"}
           </button>
         ))}
       </div>
+
+      {tab === "system" && <SystemStatusTab systemStatus={systemStatus} />}
 
       {tab === "usage" && (
         <UsageTab usage={usage} canViewUsage={canViewUsage} />
       )}
       {tab === "security" && <SecurityTab />}
     </div>
+  );
+}
+
+function SystemStatusTab({
+  systemStatus,
+}: {
+  systemStatus: readonly SystemStatusItem[];
+}) {
+  return (
+    <Card>
+      <CardContent className="space-y-3 pt-6">
+        <p className="text-xs font-semibold tracking-widest text-[var(--muted-foreground)] uppercase">
+          Real-time health of all JARVIS subsystems
+        </p>
+        {systemStatus.map(({ label, status, href }) => (
+          <div key={label} className="flex items-center justify-between">
+            {href ? (
+              <a
+                href={href}
+                className="text-sm text-[var(--foreground)] underline-offset-2 hover:underline"
+              >
+                {label}
+              </a>
+            ) : (
+              <span className="text-sm text-[var(--foreground)]">{label}</span>
+            )}
+            <Badge variant={status === "operational" ? "success" : "muted"}>
+              {status === "operational"
+                ? "Operational"
+                : status === "unreachable"
+                  ? "Unreachable"
+                  : "Not configured"}
+            </Badge>
+          </div>
+        ))}
+      </CardContent>
+    </Card>
   );
 }
 

@@ -110,6 +110,7 @@ npm run db:seed            # Seed local dev data
 ```
 
 ## Project Structure
+
 ```
 jarvis/
 ├── PROGRESS.md                    # ← Read this first. Live status of every phase.

@@ -1,15 +1,17 @@
 import { cache } from "react";
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import {
   Terminal,
   Mic2,
-  Activity,
-  Database,
-  ShieldCheck,
-  Cpu,
   Users,
-  BarChart3,
   Zap,
+  CalendarDays,
+  CheckSquare,
+  Bell,
+  MessageSquare,
+  ArrowRight,
+  Info,
 } from "lucide-react";
 import { getCurrentDbUser } from "@/lib/auth";
 import { db } from "@/lib/db";
@@ -22,6 +24,7 @@ import {
   CardDescription,
 } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { formatDateTime, formatTime } from "@/lib/format";
 
 export const dynamic = "force-dynamic";
 
@@ -32,7 +35,6 @@ const getCachedUser = cache(getCurrentDbUser);
 // Greeting helper
 // ---------------------------------------------------------------------------
 function getGreeting(): string {
-  // Server-side — use UTC hour as a proxy (good enough for a greeting)
   const hour = new Date().getUTCHours();
   if (hour < 12) return "Good morning";
   if (hour < 17) return "Good afternoon";
@@ -40,19 +42,14 @@ function getGreeting(): string {
 }
 
 // ---------------------------------------------------------------------------
-// Stat cards — real data for shipped phases, honest "not built yet" for
-// features that don't exist. Never show a number without a real query
-// backing it.
+// Stat cards — real data, never a number without a real query behind it.
 // ---------------------------------------------------------------------------
 async function getStatCards() {
-  // Real, DB-backed (Phase 3 users, Phase 5 conversations)
   const [conversationCount, userCount] = await Promise.all([
     db.conversation.count(),
     db.user.count(),
   ]);
 
-  // Real, queue-backed (Phase 9) — degrade gracefully if Redis isn't
-  // reachable rather than pretending the number is 0.
   let completedJobs: number | null = null;
   try {
     const counts = await getJobQueue().getJobCounts("completed");
@@ -67,21 +64,18 @@ async function getStatCards() {
       value: String(conversationCount),
       sub: "Total conversations logged",
       icon: Terminal,
-      locked: false,
     },
     {
       label: "Voice Sessions",
       value: "Live",
-      sub: "Browser-based (STT/TTS) — not counted server-side",
+      sub: "Browser-based (STT/TTS)",
       icon: Mic2,
-      locked: false,
     },
     {
       label: "Active Users",
       value: String(userCount),
       sub: "Total registered users",
       icon: Users,
-      locked: false,
     },
     {
       label: "Background Jobs",
@@ -91,94 +85,60 @@ async function getStatCards() {
           ? "Worker unreachable — is `npm run worker` running?"
           : "Completed jobs (heartbeat, sync, briefings)",
       icon: Zap,
-      locked: false,
     },
   ] as const;
 }
 
 // ---------------------------------------------------------------------------
-// System status items (real status checks for Phase 1–3 deliverables)
+// Live operational data — what's actually happening today, not build progress
 // ---------------------------------------------------------------------------
-// ---------------------------------------------------------------------------
-// System status — real checks, not hardcoded claims. Each entry actually
-// probes the thing it describes; if a check fails or a dependency isn't
-// configured, it's reported as such rather than defaulting to "operational".
-// ---------------------------------------------------------------------------
-async function getSystemStatus() {
-  const [dbOk, queueOk] = await Promise.allSettled([
-    db.user.count().then(() => true),
-    getJobQueue()
-      .getJobCounts("completed")
-      .then(() => true),
-  ]);
+async function getTodayData(userId: string) {
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const endOfToday = new Date();
+  endOfToday.setHours(23, 59, 59, 999);
+  const in7Days = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
-  const dbUp = dbOk.status === "fulfilled";
-  const queueUp = queueOk.status === "fulfilled";
-  const aiConfigured = Boolean(process.env.GOOGLE_AI_API_KEY);
+  const [todayEvents, upcomingTasks, recentNotifications, recentConversations] =
+    await Promise.all([
+      db.calendarEvent.findMany({
+        where: { userId, startAt: { gte: startOfToday, lte: endOfToday } },
+        orderBy: { startAt: "asc" },
+        take: 5,
+      }),
+      db.task.findMany({
+        where: {
+          userId,
+          status: { notIn: ["DONE", "CANCELLED"] },
+          dueDate: { lte: in7Days },
+        },
+        orderBy: { dueDate: "asc" },
+        take: 5,
+      }),
+      db.notification.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      }),
+      db.conversation.findMany({
+        where: { userId },
+        orderBy: { createdAt: "desc" },
+        take: 5,
+      }),
+    ]);
 
-  return [
-    {
-      label: "Database",
-      status: dbUp ? "operational" : "unreachable",
-      icon: Database,
-    },
-    {
-      label: "Authentication",
-      // If this page rendered at all, getCurrentDbUser() + Clerk both
-      // succeeded — that's the actual proof, not an assumption.
-      status: "operational",
-      icon: ShieldCheck,
-    },
-    {
-      label: "AI Engine",
-      status: aiConfigured ? "operational" : "not configured",
-      icon: Cpu,
-    },
-    {
-      label: "Agent Orchestrator",
-      // Hermes depends on the same Gemini key as the AI Engine.
-      status: aiConfigured ? "operational" : "not configured",
-      icon: Activity,
-    },
-    {
-      label: "Background Jobs",
-      status: queueUp ? "operational" : "unreachable",
-      icon: BarChart3,
-    },
-    {
-      label: "Worker Process",
-      status: queueUp ? "operational" : "unreachable",
-      icon: Zap,
-      href: "/api/queue/status",
-    },
-  ] as const;
+  return {
+    todayEvents,
+    upcomingTasks,
+    recentNotifications,
+    recentConversations,
+  };
 }
 
-// ---------------------------------------------------------------------------
-// Roadmap items — shows progress through the 20 phases
-// ---------------------------------------------------------------------------
-const ROADMAP = [
-  { phase: 1, label: "Foundation & Repo Setup", done: true },
-  { phase: 2, label: "Database & ORM", done: true },
-  { phase: 3, label: "Authentication & RBAC", done: true },
-  { phase: 4, label: "App Shell & Design System", done: true },
-  { phase: 5, label: "AI Command Center (text)", done: true },
-  { phase: 6, label: "Streaming Responses", done: true },
-  { phase: 7, label: "Hermes Orchestration Layer", done: true },
-  { phase: 8, label: "Human-in-the-Loop Approvals", done: true },
-  { phase: 9, label: "Background Jobs Infrastructure", done: true },
-  { phase: 10, label: "Buffer MCP Integration (Social)", done: true },
-  { phase: 11, label: "RevenueCat MCP Integration", done: true },
-  { phase: 12, label: "Meta Ads MCP Integration", done: true },
-  { phase: 13, label: "Customer Support Agent", done: true },
-  { phase: 14, label: "Daily Briefing Engine", done: true },
-  { phase: 15, label: "Voice Layer (Text-to-Speech)", done: true },
-  { phase: 16, label: "Voice Layer (STT + Wake Word)", done: true },
-  { phase: 17, label: "Long-Term Memory & Knowledge Base", done: true },
-  { phase: 18, label: "Notifications, Calendar, Task Management", done: true },
-  { phase: 19, label: "Security, Monitoring, Cost Tracking", done: true },
-  { phase: 20, label: "Production Deployment", done: true },
-] as const;
+function isOverdue(dueDate: Date | null) {
+  if (!dueDate) return false;
+  return new Date(dueDate) < new Date();
+}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -189,8 +149,10 @@ export default async function DashboardPage() {
 
   const greeting = getGreeting();
   const displayName = user.name ?? user.email.split("@")[0];
-  const statCards = await getStatCards();
-  const systemStatus = await getSystemStatus();
+  const [statCards, today] = await Promise.all([
+    getStatCards(),
+    getTodayData(user.id),
+  ]);
 
   return (
     <div className="h-full overflow-y-auto">
@@ -207,12 +169,19 @@ export default async function DashboardPage() {
               {greeting}, <span className="text-neon">{displayName}</span>
             </h2>
             <p className="mt-0.5 text-sm text-[var(--muted-foreground)]">
-              All 20 phases complete — JARVIS is fully built.
+              Here&apos;s what&apos;s happening today.
             </p>
           </div>
-          <Badge variant="default" className="self-start sm:self-auto">
-            {user.role}
-          </Badge>
+          <div className="flex items-center gap-2 self-start sm:self-auto">
+            <Badge variant="default">{user.role}</Badge>
+            <Link
+              href="/dashboard/about"
+              title="Build history & roadmap"
+              className="flex size-6 items-center justify-center rounded-full text-[var(--muted-foreground)] transition-colors hover:text-[var(--foreground)]"
+            >
+              <Info className="size-4" />
+            </Link>
+          </div>
         </div>
 
         {/* ------------------------------------------------------------------ */}
@@ -222,10 +191,7 @@ export default async function DashboardPage() {
           {statCards.map((card) => {
             const Icon = card.icon;
             return (
-              <Card
-                key={card.label}
-                className={card.locked ? "opacity-60" : undefined}
-              >
+              <Card key={card.label}>
                 <CardHeader className="pb-2">
                   <div className="flex items-center justify-between">
                     <CardDescription>{card.label}</CardDescription>
@@ -248,119 +214,178 @@ export default async function DashboardPage() {
         </div>
 
         {/* ------------------------------------------------------------------ */}
-        {/* Two-column grid — System Status + Roadmap                         */}
+        {/* Today & Upcoming Tasks                                            */}
         {/* ------------------------------------------------------------------ */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* System Status */}
           <Card>
             <CardHeader>
-              <CardTitle>System Status</CardTitle>
-              <CardDescription>
-                Real-time health of all JARVIS subsystems
-              </CardDescription>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <CalendarDays className="size-4 text-[var(--muted-foreground)]" />
+                    Today
+                  </CardTitle>
+                  <CardDescription>Your calendar for today</CardDescription>
+                </div>
+                <Link
+                  href="/dashboard/calendar"
+                  className="flex items-center gap-1 text-xs text-[var(--primary)] hover:underline"
+                >
+                  View calendar <ArrowRight className="size-3" />
+                </Link>
+              </div>
             </CardHeader>
-            <CardContent className="space-y-3">
-              {systemStatus.map(({ label, status, icon: Icon, ...rest }) => {
-                const href = "href" in rest ? rest.href : undefined;
-                return (
+            <CardContent className="space-y-2">
+              {today.todayEvents.length === 0 && (
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  Nothing on your calendar today.
+                </p>
+              )}
+              {today.todayEvents.map(
+                (e: (typeof today.todayEvents)[number]) => (
                   <div
-                    key={label}
-                    className="flex items-center justify-between"
+                    key={e.id}
+                    className="flex items-center justify-between text-sm"
                   >
-                    <div className="flex items-center gap-2.5">
-                      <Icon className="size-4 text-[var(--muted-foreground)]" />
-                      {href ? (
-                        <a
-                          href={href}
-                          className="text-sm text-[var(--foreground)] underline-offset-2 hover:underline"
-                        >
-                          {label}
-                        </a>
-                      ) : (
-                        <span className="text-sm text-[var(--foreground)]">
-                          {label}
-                        </span>
-                      )}
-                    </div>
-                    <Badge
-                      variant={status === "operational" ? "success" : "muted"}
-                    >
-                      {status === "operational"
-                        ? "Operational"
-                        : status === "unreachable"
-                          ? "Unreachable"
-                          : "Not configured"}
-                    </Badge>
+                    <span className="text-[var(--foreground)]">{e.title}</span>
+                    <span className="text-xs text-[var(--muted-foreground)]">
+                      {e.allDay ? "All day" : formatTime(e.startAt)}
+                    </span>
                   </div>
-                );
-              })}
+                ),
+              )}
             </CardContent>
           </Card>
 
-          {/* Roadmap progress */}
           <Card>
             <CardHeader>
-              <CardTitle>Build Roadmap</CardTitle>
-              <CardDescription>
-                20-phase implementation progress
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2.5">
-              {ROADMAP.map(({ phase, label, done }) => (
-                <div key={phase} className="flex items-center gap-3">
-                  {/* Phase number bubble */}
-                  <div
-                    className={`flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
-                      done
-                        ? "text-neon neon-glow bg-[var(--primary)]/20"
-                        : "bg-[var(--muted)] text-[var(--muted-foreground)]"
-                    }`}
-                  >
-                    {phase}
-                  </div>
-                  <span
-                    className={`flex-1 text-sm ${
-                      done
-                        ? "text-[var(--foreground)]"
-                        : "text-[var(--muted-foreground)]"
-                    }`}
-                  >
-                    {label}
-                  </span>
-                  <Badge variant={done ? "success" : "muted"}>
-                    {done ? "Done" : "Pending"}
-                  </Badge>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <CheckSquare className="size-4 text-[var(--muted-foreground)]" />
+                    Upcoming Tasks
+                  </CardTitle>
+                  <CardDescription>Due within 7 days</CardDescription>
                 </div>
-              ))}
+                <Link
+                  href="/dashboard/tasks"
+                  className="flex items-center gap-1 text-xs text-[var(--primary)] hover:underline"
+                >
+                  View tasks <ArrowRight className="size-3" />
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {today.upcomingTasks.length === 0 && (
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  Nothing due soon.
+                </p>
+              )}
+              {today.upcomingTasks.map(
+                (t: (typeof today.upcomingTasks)[number]) => (
+                  <div
+                    key={t.id}
+                    className="flex items-center justify-between text-sm"
+                  >
+                    <span className="truncate text-[var(--foreground)]">
+                      {t.title}
+                    </span>
+                    {t.dueDate && (
+                      <Badge
+                        variant={isOverdue(t.dueDate) ? "destructive" : "muted"}
+                      >
+                        {isOverdue(t.dueDate)
+                          ? "Overdue"
+                          : formatDateTime(t.dueDate)}
+                      </Badge>
+                    )}
+                  </div>
+                ),
+              )}
             </CardContent>
           </Card>
         </div>
 
         {/* ------------------------------------------------------------------ */}
-        {/* All phases shipped                                                */}
+        {/* Notifications & Recent AI Activity                                */}
         {/* ------------------------------------------------------------------ */}
-        <div>
-          <div className="glass-panel neon-glow flex items-center gap-3 p-4">
-            <div className="flex size-9 shrink-0 items-center justify-center rounded-full bg-[var(--primary)]/15">
-              <Zap className="text-neon size-4" />
-            </div>
-            <div>
-              <p className="text-sm font-medium text-[var(--foreground)]">
-                All 20 phases shipped
-              </p>
-              <p className="text-xs text-[var(--muted-foreground)]">
-                See{" "}
-                <code className="rounded bg-[var(--muted)] px-1">
-                  PROGRESS.md
-                </code>{" "}
-                for what&apos;s real vs. mock across every phase, and{" "}
-                <code className="rounded bg-[var(--muted)] px-1">
-                  DEPLOYMENT.md
-                </code>{" "}
-                for taking this to production.
-              </p>
-            </div>
-          </div>
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Bell className="size-4 text-[var(--muted-foreground)]" />
+                Notifications
+              </CardTitle>
+              <CardDescription>
+                Most recent activity across JARVIS
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2.5">
+              {today.recentNotifications.length === 0 && (
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  No notifications yet.
+                </p>
+              )}
+              {today.recentNotifications.map(
+                (n: (typeof today.recentNotifications)[number]) => (
+                  <div key={n.id} className="flex items-start gap-2">
+                    {!n.read && (
+                      <span className="mt-1.5 size-1.5 shrink-0 rounded-full bg-[var(--primary)]" />
+                    )}
+                    <div className={n.read ? "ml-3.5" : undefined}>
+                      <p className="text-sm text-[var(--foreground)]">
+                        {n.title}
+                      </p>
+                      <p className="text-xs text-[var(--muted-foreground)]">
+                        {formatDateTime(n.createdAt)}
+                      </p>
+                    </div>
+                  </div>
+                ),
+              )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle className="flex items-center gap-2">
+                    <MessageSquare className="size-4 text-[var(--muted-foreground)]" />
+                    Recent AI Activity
+                  </CardTitle>
+                  <CardDescription>
+                    Your last few Command Center chats
+                  </CardDescription>
+                </div>
+                <Link
+                  href="/dashboard/command"
+                  className="flex items-center gap-1 text-xs text-[var(--primary)] hover:underline"
+                >
+                  Open chat <ArrowRight className="size-3" />
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-2.5">
+              {today.recentConversations.length === 0 && (
+                <p className="text-sm text-[var(--muted-foreground)]">
+                  No conversations yet — say hello in Command Center.
+                </p>
+              )}
+              {today.recentConversations.map(
+                (c: (typeof today.recentConversations)[number]) => (
+                  <div key={c.id}>
+                    <p className="truncate text-sm text-[var(--foreground)]">
+                      {c.message}
+                    </p>
+                    <p className="text-xs text-[var(--muted-foreground)]">
+                      {formatDateTime(c.createdAt)}
+                    </p>
+                  </div>
+                ),
+              )}
+            </CardContent>
+          </Card>
         </div>
       </div>
     </div>

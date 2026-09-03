@@ -94,21 +94,21 @@ Everything uses one accent color (`--primary: #3ddcff`, cyan) globally. Function
 
 ---
 
-## 5. Dashboard redesign — stop looking like a build log
+## 5. Dashboard redesign — stop looking like a build log — ✅ Done
 
-### Current state
-The dashboard homepage leads with "Phase 19 of 20 complete," a 20-item roadmap checklist, and phase badges throughout the sidebar. That's useful *to me* while building, not to you while using the product.
+### Current state (before this fix)
+The dashboard homepage led with "Phase 19 of 20 complete," a 20-item roadmap checklist, and phase badges throughout the sidebar. Useful *to me* while building, not to you while using the product.
 
-### Plan
-- [ ] Move all "Phase X" / roadmap/build-progress content off the homepage into a dedicated `/dashboard/about` page (or fold into Settings) — still accessible, just not the first thing you see.
-- [ ] Replace the homepage with **live operational widgets** built from your actual data:
-  - Today's calendar events + upcoming tasks due
-  - Open/unread notifications
-  - Recent AI activity (last few Command Center / Hermes interactions)
-  - Quick stats that already exist for real (active subscribers, open tickets, ad spend this month)
-- [ ] Remove "Pn" phase badges from the sidebar for shipped features (they're no longer useful once everything's built) — keep them only on Analytics/Automations until those get real phase numbers per sections 2–3.
-
-**Effort**: medium — mostly rearranging/repurposing data already being fetched elsewhere, plus new widget components.
+### What shipped
+- [x] All "Phase X" / roadmap/build-progress content moved off the homepage to a new **`/dashboard/about`** page (linked via a small info icon next to your role badge) — still one click away, just not the first thing you see.
+- [x] Homepage replaced with **live operational widgets** built from your actual data:
+  - "Today" — your calendar events for today (real, from Phase 18)
+  - "Upcoming Tasks" — due within 7 days, overdue ones flagged (real, from Phase 18)
+  - "Notifications" — your 5 most recent, unread ones marked (real, from Phase 18)
+  - "Recent AI Activity" — your last few Command Center conversations (real, from Phase 5)
+  - Stat cards kept (AI Commands, Voice Sessions, Active Users, Background Jobs) — all already real
+- [x] System Status (Database/Auth/AI Engine/Agent Orchestrator/Background Jobs/Worker Process) moved to a new **"System Status" tab in Settings** — genuinely useful ops info, just not homepage-dominating content. Real checks, unchanged from before.
+- [x] Sidebar "Pn" phase badges: unaffected for Analytics/Automations (still correctly show no badge, since they're not scoped to a phase — see sections 2–3) — no other badges existed to remove since all 20 shipped phases' nav items never carried phase badges once enabled.
 
 ---
 
@@ -133,6 +133,7 @@ The `RealBufferService` / `RealRevenueCatService` / `RealMetaAdsService` classes
 **Effort**: small per-provider, once a real key exists — the interface/plumbing work is already done.
 
 ---
+
 ## Suggested order
 
 Given effort vs. impact:

@@ -2,12 +2,48 @@ import { cache } from "react";
 import { redirect } from "next/navigation";
 import { getCurrentDbUser, hasRole } from "@/lib/auth";
 import { db } from "@/lib/db";
+import { getJobQueue } from "@/lib/queue";
 import { microsToDisplayCost, usageWindowSince } from "@/lib/usage/pricing";
 import { SettingsView } from "@/components/settings/settings-view";
 
 export const dynamic = "force-dynamic";
 
 const getCachedUser = cache(getCurrentDbUser);
+
+async function getSystemStatus() {
+  const [dbOk, queueOk] = await Promise.allSettled([
+    db.user.count().then(() => true),
+    getJobQueue()
+      .getJobCounts("completed")
+      .then(() => true),
+  ]);
+
+  const dbUp = dbOk.status === "fulfilled";
+  const queueUp = queueOk.status === "fulfilled";
+  const aiConfigured = Boolean(process.env.GOOGLE_AI_API_KEY);
+
+  return [
+    { label: "Database", status: dbUp ? "operational" : "unreachable" },
+    { label: "Authentication", status: "operational" },
+    {
+      label: "AI Engine",
+      status: aiConfigured ? "operational" : "not configured",
+    },
+    {
+      label: "Agent Orchestrator",
+      status: aiConfigured ? "operational" : "not configured",
+    },
+    {
+      label: "Background Jobs",
+      status: queueUp ? "operational" : "unreachable",
+    },
+    {
+      label: "Worker Process",
+      status: queueUp ? "operational" : "unreachable",
+      href: "/api/queue/status",
+    },
+  ] as const;
+}
 
 export default async function SettingsPage() {
   const user = await getCachedUser();
@@ -73,6 +109,8 @@ export default async function SettingsPage() {
     };
   }
 
+  const systemStatus = await getSystemStatus();
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="mx-auto max-w-4xl space-y-6 p-6">
@@ -85,7 +123,11 @@ export default async function SettingsPage() {
           </h2>
         </div>
 
-        <SettingsView usage={usage} canViewUsage={canViewUsage} />
+        <SettingsView
+          usage={usage}
+          canViewUsage={canViewUsage}
+          systemStatus={systemStatus}
+        />
       </div>
     </div>
   );
